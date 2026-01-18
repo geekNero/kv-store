@@ -9,9 +9,17 @@ import (
 	"sort"
 )
 
-var memStore = make(map[string]string)
+type negativeCacheKey struct {
+	key string
+	man int
+}
 
-var manifest = make([]string, 0)
+var (
+	memStore             = make(map[string]string)
+	manifest             = make([]string, 0)
+	negativeCache        = make([]negativeCacheKey, 100)
+	negativeCachePointer = 0
+)
 
 func handlePut(r *spec.PutRequest) bool {
 	memStore[r.Key] = r.Value
@@ -27,9 +35,69 @@ func handleGet(key string) (string, bool) {
 	value, exists := memStore[key]
 
 	if !exists {
-		return "", false
+		value, exists, err := checkSST(key)
+		if err != nil {
+			fmt.Println("failed to checkSST: ", err.Error())
+		}
+		return value, exists
 	}
 	return value, true
+}
+
+func fetchNegativeCache(key string) negativeCacheKey {
+	for _, k := range negativeCache {
+		if k.key == key {
+			return k
+		}
+	}
+	return negativeCacheKey{key: key, man: -1}
+}
+
+func putNegativeCache(key string, man int) {
+	negativeCache[negativeCachePointer%100] = negativeCacheKey{key, man}
+	negativeCachePointer++
+}
+
+func checkSST(key string) (string, bool, error) {
+
+	cacheOut := fetchNegativeCache(key)
+	searchEndIndex := max(-1, cacheOut.man)
+
+	index := len(manifest) - 1
+	for index > searchEndIndex {
+		sstTable, err := loadSST(manifest[index])
+		if err != nil {
+			return "", false, err
+		}
+		for _, item := range sstTable {
+			if item.Key == key {
+				return item.Value, true, nil
+			}
+		}
+		index--
+	}
+
+	putNegativeCache(key, len(manifest)-1)
+
+	return "", false, nil
+}
+
+func loadSST(filename string) ([]spec.PutRequest, error) {
+	sstFile, err := os.ReadFile(filename)
+	if err != nil {
+		fmt.Printf("unable to read SST-File - %s, err: %v", filename, err.Error())
+		return nil, err
+	}
+
+	sstMap := []spec.PutRequest{}
+
+	err = json.Unmarshal(sstFile, &sstMap)
+	if err != nil {
+		fmt.Printf("unable to unmarshal SST-File - %s, err: %v", filename, err.Error())
+		return nil, err
+	}
+
+	return sstMap, nil
 }
 
 func flushMemTable() bool {
@@ -49,7 +117,7 @@ func flushMemTable() bool {
 	}
 	sort.Strings(keys)
 
-	flushOut := make([]spec.PutRequest, len(memStore))
+	flushOut := make([]spec.PutRequest, 0, len(memStore))
 	for _, key := range keys {
 		flushOut = append(flushOut, spec.PutRequest{Key: key, Value: memStore[key]})
 	}
