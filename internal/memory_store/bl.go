@@ -14,10 +14,14 @@ type negativeCacheKey struct {
 	man int
 }
 
+const (
+	negativeCacheLimit = 100
+)
+
 var (
 	memStore             = make(map[string]string)
 	manifest             = make([]string, 0)
-	negativeCache        = make([]negativeCacheKey, 100)
+	negativeCache        = make([]negativeCacheKey, negativeCacheLimit)
 	negativeCachePointer = 0
 )
 
@@ -54,7 +58,14 @@ func fetchNegativeCache(key string) negativeCacheKey {
 }
 
 func putNegativeCache(key string, man int) {
-	negativeCache[negativeCachePointer%100] = negativeCacheKey{key, man}
+	for idx, k := range negativeCache {
+		if k.key == key {
+			negativeCache[idx] = negativeCacheKey{key, man}
+			return
+		}
+	}
+
+	negativeCache[negativeCachePointer%negativeCacheLimit] = negativeCacheKey{key, man}
 	negativeCachePointer++
 }
 
