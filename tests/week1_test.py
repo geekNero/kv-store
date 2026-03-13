@@ -36,11 +36,10 @@ for test in tests:
         if response.status_code != 200:
             print("failed at test case:", test)
             sys.exit(1)
-        
-        put_requests.append({
-            "num": put_count,
-            "time_ms": round(elapsed_time * 1000, 2)
-        })
+
+        put_requests.append(
+            {"num": put_count, "time_ms": round(elapsed_time * 1000, 2)}
+        )
 
     elif test[0] == "GET":
         start_time = time.time()
@@ -54,19 +53,15 @@ for test in tests:
         if test[2] != "NOT_FOUND" and test[2] != response.text.strip('"'):
             print("failed at test case:", test)
             sys.exit(1)
-        
-        get_requests.append({
-            "put_count": put_count,
-            "time_ms": round(elapsed_time * 1000, 2)
-        })
+
+        get_requests.append(
+            {"put_count": put_count, "time_ms": round(elapsed_time * 1000, 2)}
+        )
 
 print("All tests passed")
 
 # Save benchmark data to JSON file
-benchmark_data = {
-    "put_requests": put_requests,
-    "get_requests": get_requests
-}
+benchmark_data = {"put_requests": put_requests, "get_requests": get_requests}
 
 with open("benchmark_results.json", "w") as f:
     json.dump(benchmark_data, f, indent=2)
