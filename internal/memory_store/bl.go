@@ -25,6 +25,8 @@ var (
 	negativeCachePointer = 0
 )
 
+// handlePut sets the value for the provided key directly in the in-memory map.
+// If the map size grows beyond the max table size, the map is flushed out.
 func handlePut(r *spec.PutRequest) bool {
 	memStore[r.Key] = r.Value
 
@@ -35,10 +37,13 @@ func handlePut(r *spec.PutRequest) bool {
 	return true
 }
 
+// handleGet searchs the provided key in the in-memory map, and if it fails to find it
+// there, it will search for it within the SSTs.
 func handleGet(key string) (string, bool) {
 	value, exists := memStore[key]
 
 	if !exists {
+		// check the sst tables, and ensure it doesn't error out.
 		value, exists, err := checkSST(key)
 		if err != nil {
 			fmt.Println("failed to checkSST: ", err.Error())
@@ -48,6 +53,8 @@ func handleGet(key string) (string, bool) {
 	return value, true
 }
 
+// since negative cache is supposed to be small(100) and we can iterate through it rather quickly,
+// we use an array instead of a map in this case.
 func fetchNegativeCache(key string) negativeCacheKey {
 	for _, k := range negativeCache {
 		if k.key == key {
@@ -57,6 +64,8 @@ func fetchNegativeCache(key string) negativeCacheKey {
 	return negativeCacheKey{key: key, man: -1}
 }
 
+// putNegativeCache searches through the existing cache to see if the key is present and updates it if it is.
+// If not, it places(or replaces) it at the current index of this negative cache.
 func putNegativeCache(key string, man int) {
 	for idx, k := range negativeCache {
 		if k.key == key {
@@ -69,11 +78,14 @@ func putNegativeCache(key string, man int) {
 	negativeCachePointer++
 }
 
+// checkSST searches for the keys in the SST files created by the flush operations on the local storage.
 func checkSST(key string) (string, bool, error) {
 
+	// Search through the negative cache before
 	cacheOut := fetchNegativeCache(key)
 	searchEndIndex := max(-1, cacheOut.man)
 
+	// begin looking for the key from the latest page.
 	index := len(manifest) - 1
 	for index > searchEndIndex {
 		sstTable, err := loadSST(manifest[index])
@@ -93,6 +105,7 @@ func checkSST(key string) (string, bool, error) {
 	return "", false, nil
 }
 
+// if the sst file exists, loadSST returns all of the key value pairs present in it.
 func loadSST(filename string) ([]spec.PutRequest, error) {
 	sstFile, err := os.ReadFile(filename)
 	if err != nil {
@@ -128,6 +141,7 @@ func flushMemTable() bool {
 	}
 	sort.Strings(keys)
 
+	// TODO: We can probably reserve this page.
 	flushOut := make([]spec.PutRequest, 0, len(memStore))
 	for _, key := range keys {
 		flushOut = append(flushOut, spec.PutRequest{Key: key, Value: memStore[key]})
@@ -145,6 +159,7 @@ func flushMemTable() bool {
 	}
 
 	memStore = make(map[string]string)
+	// need to test if reallocating is faster or clearing each entry is faster.
 	manifest = append(manifest, sstName)
 
 	return true
