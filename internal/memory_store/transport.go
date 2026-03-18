@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -43,5 +45,13 @@ func MemoryStoreHandler(w http.ResponseWriter, r *http.Request) {
 
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func CloseMemoryStore() {
+	err := flushManifest()
+	if err != nil {
+		log.Println("failed to save manifest, error: ", err.Error())
+		os.Remove(utility.ManifestName)
 	}
 }

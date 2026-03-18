@@ -164,3 +164,29 @@ func flushMemTable() bool {
 
 	return true
 }
+
+func flushManifest() error {
+	var f *os.File
+	var err error
+	// handle file open/create
+	f, err = os.Open(utility.ManifestName)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		f, err = os.Create(utility.ManifestName)
+		if err != nil {
+			return err
+		}
+	}
+	marshalledOut, err := json.MarshalIndent(manifest, "", " ")
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(marshalledOut)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
