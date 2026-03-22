@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net/http"
@@ -30,10 +31,14 @@ func main() {
 		log.Fatal("failed to setup memory store, error: ", err.Error())
 	}
 
+	server := &http.Server{
+		Addr: ":8080",
+	}
+
 	go func() {
 		http.HandleFunc(spec.KeyStorePath, memorystore.MemoryStoreHandler)
 		log.Println("Starting server on :8000")
-		if err := http.ListenAndServe(":8000", nil); err != nil && err != http.ErrServerClosed {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %s\n", err)
 		}
 	}()
@@ -41,8 +46,9 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
-	log.Println("Shutting down...")
 
+	log.Println("Shutting down...")
+	server.Shutdown(context.Background())
 	// ensure all operation necessary items are written to disk
 	memorystore.CloseMemoryStore()
 	utility.ProfileMemory(memprofile)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"kv_store/internal/spec"
+	"kv_store/internal/utility"
 	"os"
 	"path/filepath"
 	"testing"
@@ -304,6 +305,80 @@ func Test_putNegativeCache(t *testing.T) {
 			checkVal := negativeCache[tt.index]
 			if checkVal.key != tt.key || checkVal.man != tt.man {
 				t.Errorf("incorrect value, expected: %s, %d; got: %v", tt.key, tt.man, checkVal)
+			}
+		})
+	}
+}
+
+func Test_flushManifest(t *testing.T) {
+	cleanupFunc := func() {
+		manifest = make([]string, 0)
+		_ = os.Remove(utility.ManifestName)
+	}
+
+	tests := []struct {
+		name          string
+		inputManifest []string
+		wantErr       bool
+		prepareTest   func()
+	}{
+		{
+			name:          "T1-Empty_Manifest",
+			inputManifest: []string{},
+			wantErr:       false,
+		},
+		{
+			name:          "T2-Populated_Manifest",
+			inputManifest: []string{"sst-0.json", "sst-1.json"},
+			wantErr:       false,
+		},
+		{
+			name:          "T3-Overwrite_Existing_Manifest",
+			inputManifest: []string{"sst-new.json"},
+			wantErr:       false,
+			prepareTest: func() {
+				// Pre-create manifest with some old data
+				oldManifest := []string{"sst-old.json"}
+				data, _ := json.MarshalIndent(oldManifest, "", " ")
+				_ = os.WriteFile(utility.ManifestName, data, 0644)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanupFunc()
+			defer cleanupFunc()
+
+			if tt.prepareTest != nil {
+				tt.prepareTest()
+			}
+
+			manifest = tt.inputManifest
+			gotErr := flushManifest()
+			if gotErr != nil {
+				if !tt.wantErr {
+					t.Errorf("flushManifest() failed: %v", gotErr)
+				}
+				return
+			}
+			if tt.wantErr {
+				t.Fatal("flushManifest() succeeded unexpectedly")
+			}
+
+			// Verify file content
+			fileContent, err := os.ReadFile(utility.ManifestName)
+			if err != nil {
+				t.Fatalf("failed to read manifest file: %v", err)
+			}
+
+			var gotManifest []string
+			err = json.Unmarshal(fileContent, &gotManifest)
+			if err != nil {
+				t.Fatalf("failed to unmarshal manifest file: %v", err)
+			}
+
+			if diff := cmp.Diff(gotManifest, tt.inputManifest); diff != "" {
+				t.Errorf("manifest data mismatch (-got +want):\n%s", diff)
 			}
 		})
 	}
