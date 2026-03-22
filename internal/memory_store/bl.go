@@ -3,10 +3,13 @@ package memorystore
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"regexp"
+	"slices"
+	"sort"
+
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
-	"os"
-	"sort"
 )
 
 type negativeCacheKey struct {
@@ -80,7 +83,6 @@ func putNegativeCache(key string, man int) {
 
 // checkSST searches for the keys in the SST files created by the flush operations on the local storage.
 func checkSST(key string) (string, bool, error) {
-
 	// Search through the negative cache before
 	cacheOut := fetchNegativeCache(key)
 	searchEndIndex := max(-1, cacheOut.man)
@@ -163,6 +165,40 @@ func flushMemTable() bool {
 	manifest = append(manifest, sstName)
 
 	return true
+}
+
+func loadManifest() error {
+	bytes, err := os.ReadFile(utility.ManifestName)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		entries, err := os.ReadDir(".")
+		if err != nil {
+			return err
+		}
+
+		re := regexp.MustCompile(`^sst-\d+\.json$`)
+		for _, entry := range entries {
+			isSSTFile := re.MatchString(entry.Name())
+			if isSSTFile {
+				manifest = append(manifest, entry.Name())
+			}
+		}
+		slices.SortFunc(manifest, func(a string, b string) int {
+			numA := utility.ExtractSSTFileNumber(a)
+			numB := utility.ExtractSSTFileNumber(b)
+
+			return numA - numB
+		})
+
+	} else {
+		err = json.Unmarshal(bytes, &manifest)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func flushManifest() error {

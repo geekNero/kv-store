@@ -4,3 +4,4 @@ venv/
 cpu.prof
 mem.prof
 benchmark_results.json
+cmd/kvs/kvs

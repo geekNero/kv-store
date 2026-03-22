@@ -25,6 +25,11 @@ func main() {
 		defer closer()
 	}
 
+	err := memorystore.SetupMemoryStore()
+	if err != nil {
+		log.Fatal("failed to setup memory store, error: ", err.Error())
+	}
+
 	go func() {
 		http.HandleFunc(spec.KeyStorePath, memorystore.MemoryStoreHandler)
 		log.Println("Starting server on :8000")

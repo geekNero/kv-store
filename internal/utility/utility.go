@@ -1,6 +1,10 @@
 package utility
 
-import "unicode"
+import (
+	"strconv"
+	"strings"
+	"unicode"
+)
 
 func IsASCII(s string) bool {
 	for i := 0; i < len(s); i++ {
@@ -9,4 +13,13 @@ func IsASCII(s string) bool {
 		}
 	}
 	return true
+}
+
+func ExtractSSTFileNumber(name string) int {
+	name = strings.Trim(name, "st-.jon")
+	x, err := strconv.Atoi(name)
+	if err != nil {
+		return -1
+	}
+	return x
 }

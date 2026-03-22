@@ -58,6 +58,10 @@ func MemoryStoreHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func SetupMemoryStore() error {
+	return loadManifest()
+}
+
 func CloseMemoryStore() {
 	err := flushManifest()
 	if err != nil {
