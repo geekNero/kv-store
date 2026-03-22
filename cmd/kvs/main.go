@@ -2,18 +2,21 @@ package main
 
 import (
 	"flag"
-	memorystore "kv_store/internal/memory_store"
-	"kv_store/internal/spec"
-	"kv_store/internal/utility"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+
+	memorystore "kv_store/internal/memory_store"
+	"kv_store/internal/spec"
+	"kv_store/internal/utility"
 )
 
-var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to `file`")
-var memprofile = flag.String("memprofile", "", "write memory profile to `file`")
+var (
+	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to `file`")
+	memprofile = flag.String("memprofile", "", "write memory profile to `file`")
+)
 
 func main() {
 	flag.Parse()

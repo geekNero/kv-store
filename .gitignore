@@ -1,2 +1,6 @@
 .aider*
 .opencode/
+venv/
+cpu.prof
+mem.prof
+benchmark_results.json

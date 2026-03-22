@@ -3,16 +3,16 @@ package memorystore
 import (
 	"encoding/json"
 	"fmt"
-	"kv_store/internal/spec"
-	"kv_store/internal/utility"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+
+	"kv_store/internal/spec"
+	"kv_store/internal/utility"
 )
 
 func MemoryStoreHandler(w http.ResponseWriter, r *http.Request) {
-
 	key := strings.Split(r.URL.Path, spec.KeyStorePath)[1]
 
 	if !utility.IsASCII(key) {
@@ -27,7 +27,12 @@ func MemoryStoreHandler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		w.Write([]byte(val))
+		_, err := w.Write([]byte(val))
+		if err != nil {
+			log.Println("failed to write response body, error: ", err.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+
 	case http.MethodPut:
 
 		var body spec.PutRequest
@@ -41,7 +46,12 @@ func MemoryStoreHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		body.Key = key
-		handlePut(&body)
+		accepted := handlePut(&body)
+		if accepted {
+			w.WriteHeader(http.StatusAccepted)
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
 
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -52,6 +62,9 @@ func CloseMemoryStore() {
 	err := flushManifest()
 	if err != nil {
 		log.Println("failed to save manifest, error: ", err.Error())
-		os.Remove(utility.ManifestName)
+		err = os.Remove(utility.ManifestName)
+		if err != nil {
+			log.Println("failed to delete existing manifest, error: ", err.Error())
+		}
 	}
 }
