@@ -3,6 +3,7 @@ package memorystore
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"slices"
@@ -34,7 +35,18 @@ func handlePut(r *spec.PutRequest) bool {
 	memStore[r.Key] = r.Value
 
 	if len(memStore) >= utility.MemTableSize {
-		flushMemTable()
+
+		// We can flush the memtable in parallel, without a fallback mechanism for its failure, as the most common
+		// reasons for write failures are out of storage errors. We can expect the user to have sufficient storage available
+		// to provide the expected functionality.
+
+		// while this code is single threaded, we can block all GET calls this way. This needs to be reconsidered when
+		// the GET calls are in parallel. Probably through a turnstile.
+		memFlush.Store(true)
+
+		// memFlush is set to False inside flushMemTable
+		go flushMemTable(memStore)
+		memStore = map[string]string{}
 	}
 
 	return true
@@ -116,7 +128,6 @@ func loadSST(filename string) ([]spec.PutRequest, error) {
 	}
 
 	sstMap := []spec.PutRequest{}
-
 	err = json.Unmarshal(sstFile, &sstMap)
 	if err != nil {
 		fmt.Printf("unable to unmarshal SST-File - %s, err: %v", filename, err.Error())
@@ -126,43 +137,48 @@ func loadSST(filename string) ([]spec.PutRequest, error) {
 	return sstMap, nil
 }
 
-func flushMemTable() bool {
+func flushMemTable(mstore map[string]string) bool {
+	defer func() {
+		memFlush.Store(false)
+		memFlushComplete <- struct{}{}
+	}()
+
 	sstid := len(manifest)
 	sstName := fmt.Sprintf("sst-%d.json", sstid)
+	manifest = append(manifest, sstName)
 
 	f, err := os.Create(sstName)
 	if err != nil {
-		fmt.Printf("failed to flush mem-table: %v\n", err.Error())
+		log.Println("failed to flush mem-table: %v\n", err.Error())
 		return false
 	}
 
+	defer f.Close()
+
 	// Convert the mem-table into a list of PutRequests, to be marshalled out.
-	keys := make([]string, 0, len(memStore))
-	for key := range memStore {
+	keys := make([]string, 0, len(mstore))
+	for key := range mstore {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 
 	// TODO: We can probably reserve this page.
-	flushOut := make([]spec.PutRequest, 0, len(memStore))
+	flushOut := make([]spec.PutRequest, 0, len(mstore))
 	for _, key := range keys {
-		flushOut = append(flushOut, spec.PutRequest{Key: key, Value: memStore[key]})
+		flushOut = append(flushOut, spec.PutRequest{Key: key, Value: mstore[key]})
 	}
 
 	marshalledOut, err := json.MarshalIndent(flushOut, "", " ")
 	if err != nil {
-		fmt.Println("failed to marshal output in flush: ", err.Error())
+		log.Println("failed to marshal output in flush: ", err.Error())
 		return false
 	}
 	_, err = f.Write(marshalledOut)
 	if err != nil {
-		fmt.Printf("failed to write to sst file: %s, err: %v\n", sstName, err.Error())
+		log.Println("failed to write to sst file: %s, err: %v\n", sstName, err.Error())
 		return false
 	}
-
-	memStore = make(map[string]string)
-	// need to test if reallocating is faster or clearing each entry is faster.
-	manifest = append(manifest, sstName)
+	f.Sync()
 
 	return true
 }

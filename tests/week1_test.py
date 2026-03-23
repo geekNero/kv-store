@@ -35,6 +35,7 @@ for test in tests:
 
         if response.status_code != 200:
             print("failed at test case:", test)
+            print(response.status_code)
             sys.exit(1)
 
         put_requests.append(

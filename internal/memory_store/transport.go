@@ -7,9 +7,15 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
+)
+
+var (
+	memFlush         atomic.Bool
+	memFlushComplete = make(chan struct{})
 )
 
 func MemoryStoreHandler(w http.ResponseWriter, r *http.Request) {
@@ -22,6 +28,13 @@ func MemoryStoreHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+
+		if memFlush.Load() {
+			log.Println("waiting on flush to complete")
+			<-memFlushComplete
+			log.Println("flush complete")
+		}
+
 		val, found := handleGet(key)
 		if !found {
 			w.WriteHeader(http.StatusNotFound)
@@ -48,7 +61,7 @@ func MemoryStoreHandler(w http.ResponseWriter, r *http.Request) {
 		body.Key = key
 		accepted := handlePut(&body)
 		if accepted {
-			w.WriteHeader(http.StatusAccepted)
+			w.WriteHeader(http.StatusOK)
 		} else {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}

@@ -30,13 +30,15 @@ func main() {
 	if err != nil {
 		log.Fatal("failed to setup memory store, error: ", err.Error())
 	}
+	mux := http.NewServeMux()
+	mux.HandleFunc(spec.KeyStorePath, memorystore.MemoryStoreHandler)
 
 	server := &http.Server{
-		Addr: ":8080",
+		Addr:    ":8000",
+		Handler: mux,
 	}
 
 	go func() {
-		http.HandleFunc(spec.KeyStorePath, memorystore.MemoryStoreHandler)
 		log.Println("Starting server on :8000")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %s\n", err)

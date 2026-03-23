@@ -5,5 +5,5 @@ const (
 	MemTableSize = 2000
 
 	// File Names
-	ManifestName = "mainfest.json"
+	ManifestName = "manifest.json"
 )
