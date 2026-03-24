@@ -48,7 +48,7 @@ func MemoryStoreHandler(w http.ResponseWriter, r *http.Request) {
 		body.Key = key
 		accepted := handlePut(&body)
 		if accepted {
-			w.WriteHeader(http.StatusAccepted)
+			w.WriteHeader(http.StatusOK)
 		} else {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
