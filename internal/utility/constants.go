@@ -6,4 +6,8 @@ const (
 
 	// File Names
 	ManifestName = "manifest.json"
+	WALName      = "wal.db"
+
+	// Operations
+	PUT = "put"
 )

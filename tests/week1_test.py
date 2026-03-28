@@ -27,11 +27,19 @@ for test in tests:
 
     if test[0] == "PUT":
         data = {"value": test[2]}
-
-        start_time = time.time()
-        response = requests.put(base_url, json=data)
-        elapsed_time = time.time() - start_time
-        put_count += 1
+        retry = 10
+        while retry > 0:
+            try:
+                start_time = time.time()
+                response = requests.put(base_url, json=data)
+                elapsed_time = time.time() - start_time
+                put_count += 1
+                break
+            except requests.exceptions.ConnectionError:
+                retry -= 1
+                sleepTime = (10 - retry) * 10
+                print(f"server down, retrying in {sleepTime} seconds")
+                time.sleep(sleepTime)
 
         if response.status_code != 200:
             print("failed at test case:", test)
@@ -42,9 +50,18 @@ for test in tests:
         )
 
     elif test[0] == "GET":
-        start_time = time.time()
-        response = requests.get(base_url)
-        elapsed_time = time.time() - start_time
+        retry = 10
+        while retry > 0:
+            try:
+                start_time = time.time()
+                response = requests.get(base_url)
+                elapsed_time = time.time() - start_time
+                break
+            except requests.exceptions.ConnectionError:
+                retry -= 1
+                sleepTime = (10 - retry) * 10
+                print(f"server down, retrying in {sleepTime} seconds")
+                time.sleep(sleepTime)
 
         if test[2] == "NOT_FOUND" and response.status_code != 404:
             print("failed at test case:", test)

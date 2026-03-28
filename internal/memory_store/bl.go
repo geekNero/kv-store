@@ -1,12 +1,16 @@
 package memorystore
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"regexp"
 	"slices"
 	"sort"
+	"sync"
 
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
@@ -15,6 +19,13 @@ import (
 type negativeCacheKey struct {
 	key string
 	man int
+}
+
+type WAL struct {
+	fileHandle *os.File
+	walEncoder *json.Encoder
+	lock       sync.Mutex
+	// syncCounter int
 }
 
 const (
@@ -26,6 +37,7 @@ var (
 	manifest             = make([]string, 0)
 	negativeCache        = make([]negativeCacheKey, negativeCacheLimit)
 	negativeCachePointer = 0
+	wal                  WAL
 )
 
 // handlePut sets the value for the provided key directly in the in-memory map.
@@ -35,9 +47,30 @@ func handlePut(r *spec.PutRequest) bool {
 
 	if len(memStore) >= utility.MemTableSize {
 		flushMemTable()
+		flushWAL()
+	} else {
+		go walWrite(&spec.WALRequest{
+			Key:       r.Key,
+			Value:     r.Value,
+			Operation: utility.PUT,
+		})
 	}
 
 	return true
+}
+
+func walWrite(r *spec.WALRequest) {
+	wal.lock.Lock()
+	defer wal.lock.Unlock()
+	wal.walEncoder.Encode(r)
+	// wal.syncCounter++
+	// // if wal.syncCounter == 10 {
+	// 	wal.syncCounter = 0
+	err := wal.fileHandle.Sync()
+	if err != nil {
+		log.Println("failed to sync WAL to FS, error: ", err.Error())
+	}
+	// }
 }
 
 // handleGet searchs the provided key in the in-memory map, and if it fails to find it
@@ -136,6 +169,8 @@ func flushMemTable() bool {
 		return false
 	}
 
+	defer f.Close()
+
 	// Convert the mem-table into a list of PutRequests, to be marshalled out.
 	keys := make([]string, 0, len(memStore))
 	for key := range memStore {
@@ -159,6 +194,10 @@ func flushMemTable() bool {
 		fmt.Printf("failed to write to sst file: %s, err: %v\n", sstName, err.Error())
 		return false
 	}
+	err = f.Sync()
+	if err != nil {
+		log.Printf("failed to sync SSTFile - %s, error: %s", sstName, err.Error())
+	}
 
 	memStore = make(map[string]string)
 	// need to test if reallocating is faster or clearing each entry is faster.
@@ -167,6 +206,55 @@ func flushMemTable() bool {
 	return true
 }
 
+func flushWAL() {
+	wal.lock.Lock()
+	defer wal.lock.Unlock()
+	err := wal.fileHandle.Truncate(0)
+	if err != nil {
+		log.Println("failed to truncate WAL file, error: ", err.Error())
+
+	}
+	wal.fileHandle.Sync()
+	_, err = wal.fileHandle.Seek(0, 0)
+	if err != nil {
+		log.Println("failed to sync after truncating WAL file, error: ", err.Error())
+	}
+
+	// wal.syncCounter = 0
+}
+
+// Section of functions that contain code to clean the memory store setup
+func closeWAL() {
+	wal.lock.Lock()
+	defer wal.lock.Unlock()
+
+	wal.fileHandle.Close()
+}
+
+func flushManifest() error {
+	var f *os.File
+	var err error
+	// handle file create
+	f, err = os.Create(utility.ManifestName)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	marshalledOut, err := json.MarshalIndent(manifest, "", " ")
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(marshalledOut)
+	if err != nil {
+		return err
+	}
+
+	f.Sync()
+
+	return nil
+}
+
+// Section of functions that contain code to setup the memory store
 func loadManifest() error {
 	bytes, err := os.ReadFile(utility.ManifestName)
 	if err != nil {
@@ -201,22 +289,47 @@ func loadManifest() error {
 	return nil
 }
 
-func flushManifest() error {
-	var f *os.File
-	var err error
-	// handle file create
-	f, err = os.Create(utility.ManifestName)
+func loadWAL() error {
+	replay := true
+
+	f, err := os.ReadFile(utility.WALName)
 	if err != nil {
-		return err
-	}
-	marshalledOut, err := json.MarshalIndent(manifest, "", " ")
-	if err != nil {
-		return err
-	}
-	_, err = f.Write(marshalledOut)
-	if err != nil {
-		return err
+		if os.IsNotExist(err) {
+			replay = false
+		} else {
+			log.Println("unable to read from wal.db, error: ", err.Error())
+			return err
+		}
 	}
 
+	if replay {
+		decoder := json.NewDecoder(bytes.NewReader(f))
+		for {
+			var kv spec.WALRequest
+
+			err := decoder.Decode(&kv)
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				log.Fatal("decode failed: ", err.Error())
+			}
+			if kv.Operation == utility.PUT {
+				// we cannot use handlePut as handlePut also writes to WAL and we enter a loop.
+				// handlePut(&spec.PutRequest{Key: kv.Key, Value: kv.Value})
+				memStore[kv.Key] = kv.Value
+			}
+		}
+	}
+
+	// open the file handle to WAL
+	wal.fileHandle, err = os.OpenFile(utility.WALName, os.O_TRUNC|os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Println("failed to create a new wal file in append mode, error: ", err.Error())
+		return err
+	}
+	wal.walEncoder = json.NewEncoder(wal.fileHandle)
+	wal.lock = sync.Mutex{}
+	// wal.syncCounter = 0
 	return nil
 }

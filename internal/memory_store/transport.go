@@ -59,6 +59,11 @@ func MemoryStoreHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func SetupMemoryStore() error {
+
+	err := loadWAL()
+	if err != nil {
+		return err
+	}
 	return loadManifest()
 }
 
@@ -71,4 +76,6 @@ func CloseMemoryStore() {
 			log.Println("failed to delete existing manifest, error: ", err.Error())
 		}
 	}
+
+	closeWAL()
 }
