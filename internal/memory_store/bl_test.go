@@ -3,11 +3,13 @@ package memorystore
 import (
 	"encoding/json"
 	"fmt"
-	"kv_store/internal/spec"
-	"kv_store/internal/utility"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
+
+	"kv_store/internal/spec"
+	"kv_store/internal/utility"
 
 	"github.com/google/go-cmp/cmp"
 )
@@ -22,7 +24,6 @@ func cleanSSTFiles() {
 	for _, f := range files {
 		_ = os.Remove(f)
 	}
-
 }
 
 func cleanWAL() {
@@ -34,14 +35,12 @@ func cleanWAL() {
 }
 
 func Test_flushMemTable(t *testing.T) {
-
 	type args struct {
 		inputManifest []string
 		sstFileName   string
 	}
 
 	memTableGenerator := func() map[string]string {
-
 		testMemTable := map[string]string{
 			"key1": "val1",
 			"key2": "val2",
@@ -80,7 +79,6 @@ func Test_flushMemTable(t *testing.T) {
 				}
 				sstData := []spec.PutRequest{}
 				err = json.Unmarshal(sstFile, &sstData)
-
 				if err != nil {
 					t.Errorf("failed: unable to unmarshal sstFile - %s", tt.sstFileName)
 				}
@@ -109,7 +107,6 @@ func Test_flushMemTable(t *testing.T) {
 }
 
 func Test_checkSST(t *testing.T) {
-
 	cleanupFunc := func() {
 		memStore = make(map[string]string)
 		manifest = make([]string, 0)
@@ -353,7 +350,7 @@ func Test_flushManifest(t *testing.T) {
 				// Pre-create manifest with some old data
 				oldManifest := []string{"sst-old.json"}
 				data, _ := json.MarshalIndent(oldManifest, "", " ")
-				_ = os.WriteFile(utility.ManifestName, data, 0644)
+				_ = os.WriteFile(utility.ManifestName, data, 0o644)
 			},
 		},
 	}
@@ -498,7 +495,7 @@ func Test_loadWAL(t *testing.T) {
 				closeWAL()
 
 				// Manually corrupt the file
-				f, _ := os.OpenFile(utility.WALName, os.O_RDWR, 0644)
+				f, _ := os.OpenFile(utility.WALName, os.O_RDWR, 0o644)
 				f.Seek(-5, 2) // go back a bit and change something
 				f.Write([]byte("corruption"))
 				f.Close()
