@@ -60,13 +60,22 @@ func handlePut(r *spec.PutRequest) bool {
 }
 
 func walWrite(r *spec.WALRequest) {
+
+	hash, err := utility.HashStruct(r)
+	if err != nil {
+		log.Println("failed to calculate hash for WAL entry, error: ", err.Error())
+		return
+	}
+
+	r.Hash = hash
+
 	wal.lock.Lock()
 	defer wal.lock.Unlock()
 	wal.walEncoder.Encode(r)
 	// wal.syncCounter++
 	// // if wal.syncCounter == 10 {
 	// 	wal.syncCounter = 0
-	err := wal.fileHandle.Sync()
+	err = wal.fileHandle.Sync()
 	if err != nil {
 		log.Println("failed to sync WAL to FS, error: ", err.Error())
 	}
@@ -312,8 +321,26 @@ func loadWAL() error {
 				if err == io.EOF {
 					break
 				}
-				log.Fatal("decode failed: ", err.Error())
+				log.Println("decode failed: ", err.Error())
+				break
 			}
+
+			diskHash := kv.Hash
+
+			kv.Hash = 0
+
+			hash, err := utility.HashStruct(kv)
+
+			if err != nil {
+				log.Println("unable to calculate hash for wal request present on disk, assuming corruption from this point, error: ", err.Error())
+				break
+			}
+
+			if hash != diskHash {
+				log.Println("hash for wal request present on disk does not match with data, skipping loading of further entries from disk")
+				break
+			}
+
 			if kv.Operation == utility.PUT {
 				// we cannot use handlePut as handlePut also writes to WAL and we enter a loop.
 				// handlePut(&spec.PutRequest{Key: kv.Key, Value: kv.Value})

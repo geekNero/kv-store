@@ -1,6 +1,8 @@
 package utility
 
 import (
+	"encoding/json"
+	"hash/crc32"
 	"strconv"
 	"strings"
 	"unicode"
@@ -22,4 +24,13 @@ func ExtractSSTFileNumber(name string) int {
 		return -1
 	}
 	return x
+}
+
+func HashStruct(v any) (uint32, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return 0, err
+	}
+
+	return crc32.Checksum(data, crc32.MakeTable(crc32.Castagnoli)), nil
 }

@@ -25,6 +25,14 @@ func cleanSSTFiles() {
 
 }
 
+func cleanWAL() {
+	if wal.fileHandle != nil {
+		wal.fileHandle.Close()
+		wal.fileHandle = nil
+	}
+	_ = os.Remove(utility.WALName)
+}
+
 func Test_flushMemTable(t *testing.T) {
 
 	type args struct {
@@ -78,9 +86,14 @@ func Test_flushMemTable(t *testing.T) {
 				}
 
 				// Convert map to slice of PutRequest for comparison
-				memTableSlice := make([]spec.PutRequest, 0, len(memTableGenerator()))
-				for k, v := range memTableGenerator() {
-					memTableSlice = append(memTableSlice, spec.PutRequest{Key: k, Value: v})
+				keys := make([]string, 0, len(memTableGenerator()))
+				for k := range memTableGenerator() {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				memTableSlice := make([]spec.PutRequest, 0, len(keys))
+				for _, k := range keys {
+					memTableSlice = append(memTableSlice, spec.PutRequest{Key: k, Value: memTableGenerator()[k]})
 				}
 				if diff := cmp.Diff(sstData, memTableSlice); diff != "" {
 					t.Errorf("failed: data don't match\n %s", diff)
@@ -380,6 +393,135 @@ func Test_flushManifest(t *testing.T) {
 			if diff := cmp.Diff(gotManifest, tt.inputManifest); diff != "" {
 				t.Errorf("manifest data mismatch (-got +want):\n%s", diff)
 			}
+		})
+	}
+}
+
+func Test_walWrite(t *testing.T) {
+	tests := []struct {
+		name string
+		r    *spec.WALRequest
+	}{
+		{
+			name: "T1-BasicPut",
+			r: &spec.WALRequest{
+				Key:       "key1",
+				Value:     "val1",
+				Operation: utility.PUT,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanWAL()
+			defer cleanWAL()
+			err := loadWAL()
+			if err != nil {
+				t.Fatalf("loadWAL failed: %v", err)
+			}
+
+			walWrite(tt.r)
+
+			// Read back and verify
+			f, err := os.Open(utility.WALName)
+			if err != nil {
+				t.Fatalf("failed to open WAL: %v", err)
+			}
+			defer f.Close()
+
+			var got spec.WALRequest
+			err = json.NewDecoder(f).Decode(&got)
+			if err != nil {
+				t.Fatalf("failed to decode WAL entry: %v", err)
+			}
+
+			if got.Key != tt.r.Key || got.Value != tt.r.Value || got.Operation != tt.r.Operation {
+				t.Errorf("walWrite() = %v, want %v", got, tt.r)
+			}
+			if got.Hash == 0 {
+				t.Errorf("walWrite() hash is 0")
+			}
+		})
+	}
+}
+
+func Test_flushWAL(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "T1-Flush"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanWAL()
+			defer cleanWAL()
+			loadWAL()
+
+			walWrite(&spec.WALRequest{Key: "k1", Value: "v1", Operation: utility.PUT})
+			flushWAL()
+
+			info, err := os.Stat(utility.WALName)
+			if err != nil {
+				t.Fatalf("failed to stat WAL: %v", err)
+			}
+			if info.Size() != 0 {
+				t.Errorf("flushWAL() did not truncate file, size = %d", info.Size())
+			}
+		})
+	}
+}
+
+func Test_loadWAL(t *testing.T) {
+	tests := []struct {
+		name    string
+		setup   func()
+		want    map[string]string
+		wantErr bool
+	}{
+		{
+			name: "T1-Replay",
+			setup: func() {
+				cleanWAL()
+				loadWAL()
+				walWrite(&spec.WALRequest{Key: "k1", Value: "v1", Operation: utility.PUT})
+				walWrite(&spec.WALRequest{Key: "k2", Value: "v2", Operation: utility.PUT})
+				closeWAL()
+			},
+			want: map[string]string{"k1": "v1", "k2": "v2"},
+		},
+		{
+			name: "T2-CorruptHash",
+			setup: func() {
+				cleanWAL()
+				loadWAL()
+				walWrite(&spec.WALRequest{Key: "k1", Value: "v1", Operation: utility.PUT})
+				closeWAL()
+
+				// Manually corrupt the file
+				f, _ := os.OpenFile(utility.WALName, os.O_RDWR, 0644)
+				f.Seek(-5, 2) // go back a bit and change something
+				f.Write([]byte("corruption"))
+				f.Close()
+			},
+			want: map[string]string{}, // Should stop at corruption or skip the corrupt entry
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			memStore = make(map[string]string)
+			if tt.setup != nil {
+				tt.setup()
+			}
+
+			err := loadWAL()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("loadWAL() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if diff := cmp.Diff(memStore, tt.want); diff != "" {
+				t.Errorf("memStore mismatch (-got +want):\n%s", diff)
+			}
+			cleanWAL()
 		})
 	}
 }
