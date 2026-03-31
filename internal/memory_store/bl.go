@@ -1,7 +1,6 @@
 package memorystore
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -49,6 +48,10 @@ func handlePut(r *spec.PutRequest) bool {
 		flushMemTable()
 		flushWAL()
 	} else {
+		// WAL writes cannot be called concurrently because when the goroutine waits on the lock,
+		// the scheduler does not guarantee FIFO, meaning a newer PUT request can get the lock
+		// before an older PUT request.
+		// TODO: Find a way to use a FIFO queue for these writes.
 		walWrite(&spec.WALRequest{
 			Key:       r.Key,
 			Value:     r.Value,
@@ -70,13 +73,18 @@ func walWrite(r *spec.WALRequest) {
 
 	// wal.lock.Lock()
 	// defer wal.lock.Unlock()
-	wal.walEncoder.Encode(r)
+	err = wal.walEncoder.Encode(r)
+	if err != nil {
+		log.Println("failed to write WAL req to FS, error: ", err.Error())
+		return
+	}
 	// wal.syncCounter++
 	// // if wal.syncCounter == 10 {
 	// 	wal.syncCounter = 0
 	err = wal.fileHandle.Sync()
 	if err != nil {
 		log.Println("failed to sync WAL to FS, error: ", err.Error())
+		return
 	}
 	// }
 }
@@ -299,7 +307,7 @@ func loadManifest() error {
 func loadWAL() error {
 	replay := true
 
-	f, err := os.ReadFile(utility.WALName)
+	f, err := os.Open(utility.WALName)
 	if err != nil {
 		if os.IsNotExist(err) {
 			replay = false
@@ -308,18 +316,20 @@ func loadWAL() error {
 			return err
 		}
 	}
+	defer f.Close()
 
 	if replay {
-		decoder := json.NewDecoder(bytes.NewReader(f))
+		decoder := json.NewDecoder(f)
 		for {
 			var kv spec.WALRequest
-
+			offset := decoder.InputOffset()
 			err := decoder.Decode(&kv)
 			if err != nil {
 				if err == io.EOF {
 					break
 				}
 				log.Println("decode failed: ", err.Error())
+				f.Truncate(offset)
 				break
 			}
 
@@ -330,11 +340,13 @@ func loadWAL() error {
 			hash, err := utility.HashStruct(kv)
 			if err != nil {
 				log.Println("unable to calculate hash for wal request present on disk, assuming corruption from this point, error: ", err.Error())
+				f.Truncate(offset)
 				break
 			}
 
 			if hash != diskHash {
 				log.Println("hash for wal request present on disk does not match with data, skipping loading of further entries from disk")
+				f.Truncate(offset)
 				break
 			}
 

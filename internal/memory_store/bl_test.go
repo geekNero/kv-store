@@ -397,27 +397,46 @@ func Test_flushManifest(t *testing.T) {
 func Test_walWrite(t *testing.T) {
 	tests := []struct {
 		name string
-		r    *spec.WALRequest
+		r    []*spec.WALRequest
 	}{
 		{
 			name: "T1-BasicPut",
-			r: &spec.WALRequest{
-				Key:       "key1",
-				Value:     "val1",
-				Operation: utility.PUT,
+			r: []*spec.WALRequest{
+				{
+					Key:       "key1",
+					Value:     "val1",
+					Operation: utility.PUT,
+				},
+			},
+		},
+		{
+			name: "T2-MultiplePut",
+			r: []*spec.WALRequest{
+				{
+					Key:       "key1",
+					Value:     "val1",
+					Operation: utility.PUT,
+				},
+				{
+					Key:       "key2",
+					Value:     "val2",
+					Operation: utility.PUT,
+				},
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cleanWAL()
-			defer cleanWAL()
+			// defer cleanWAL()
 			err := loadWAL()
 			if err != nil {
 				t.Fatalf("loadWAL failed: %v", err)
 			}
 
-			walWrite(tt.r)
+			for _, req := range tt.r {
+				walWrite(req)
+			}
 
 			// Read back and verify
 			f, err := os.Open(utility.WALName)
@@ -426,17 +445,20 @@ func Test_walWrite(t *testing.T) {
 			}
 			defer f.Close()
 
-			var got spec.WALRequest
-			err = json.NewDecoder(f).Decode(&got)
-			if err != nil {
-				t.Fatalf("failed to decode WAL entry: %v", err)
-			}
+			decoder := json.NewDecoder(f)
+			for _, req := range tt.r {
+				var got spec.WALRequest
+				err = decoder.Decode(&got)
+				if err != nil {
+					t.Fatalf("failed to decode WAL entry: %v", err)
+				}
 
-			if got.Key != tt.r.Key || got.Value != tt.r.Value || got.Operation != tt.r.Operation {
-				t.Errorf("walWrite() = %v, want %v", got, tt.r)
-			}
-			if got.Hash == 0 {
-				t.Errorf("walWrite() hash is 0")
+				if got.Key != req.Key || got.Value != req.Value || got.Operation != req.Operation {
+					t.Errorf("walWrite() = %v, want %v", got, req)
+				}
+				if got.Hash == 0 {
+					t.Errorf("walWrite() hash is 0")
+				}
 			}
 		})
 	}
@@ -492,6 +514,7 @@ func Test_loadWAL(t *testing.T) {
 				cleanWAL()
 				loadWAL()
 				walWrite(&spec.WALRequest{Key: "k1", Value: "v1", Operation: utility.PUT})
+				walWrite(&spec.WALRequest{Key: "k2", Value: "v2", Operation: utility.PUT})
 				closeWAL()
 
 				// Manually corrupt the file
@@ -500,7 +523,7 @@ func Test_loadWAL(t *testing.T) {
 				f.Write([]byte("corruption"))
 				f.Close()
 			},
-			want: map[string]string{}, // Should stop at corruption or skip the corrupt entry
+			want: map[string]string{"k1": "v1"}, // Should stop at corruption or skip the corrupt entry
 		},
 	}
 	for _, tt := range tests {
@@ -521,4 +544,39 @@ func Test_loadWAL(t *testing.T) {
 			cleanWAL()
 		})
 	}
+}
+
+// Single scenario test
+func Test_loadWALTruncation(t *testing.T) {
+	memStore = make(map[string]string)
+	cleanWAL()
+	loadWAL()
+	walWrite(&spec.WALRequest{Key: "k1", Value: "v1", Operation: utility.PUT})
+	closeWAL()
+
+	// Manually corrupt the file
+	f, _ := os.OpenFile(utility.WALName, os.O_RDWR, 0o644)
+	f.Seek(-5, 2) // go back a bit and change something
+	f.Write([]byte("corruption"))
+	f.Close()
+
+	err := loadWAL()
+	if err != nil {
+		t.Errorf("loadWAL() error = %v", err)
+	}
+
+	if diff := cmp.Diff(memStore, map[string]string{}); diff != "" {
+		t.Errorf("memStore mismatch (-got +want):\n%s", diff)
+	}
+
+	info, err := os.Stat(utility.WALName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Size() != 0 {
+		t.Errorf("WAL size should be 0 after truncating")
+	}
+
+	cleanWAL()
 }
