@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
-	"sync"
+	// "sync"
 
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
@@ -24,7 +24,7 @@ type negativeCacheKey struct {
 type WAL struct {
 	fileHandle *os.File
 	walEncoder *json.Encoder
-	lock       sync.Mutex
+	// lock       sync.Mutex
 	// syncCounter int
 }
 
@@ -49,7 +49,7 @@ func handlePut(r *spec.PutRequest) bool {
 		flushMemTable()
 		flushWAL()
 	} else {
-		go walWrite(&spec.WALRequest{
+		walWrite(&spec.WALRequest{
 			Key:       r.Key,
 			Value:     r.Value,
 			Operation: utility.PUT,
@@ -60,7 +60,6 @@ func handlePut(r *spec.PutRequest) bool {
 }
 
 func walWrite(r *spec.WALRequest) {
-
 	hash, err := utility.HashStruct(r)
 	if err != nil {
 		log.Println("failed to calculate hash for WAL entry, error: ", err.Error())
@@ -69,8 +68,8 @@ func walWrite(r *spec.WALRequest) {
 
 	r.Hash = hash
 
-	wal.lock.Lock()
-	defer wal.lock.Unlock()
+	// wal.lock.Lock()
+	// defer wal.lock.Unlock()
 	wal.walEncoder.Encode(r)
 	// wal.syncCounter++
 	// // if wal.syncCounter == 10 {
@@ -216,12 +215,11 @@ func flushMemTable() bool {
 }
 
 func flushWAL() {
-	wal.lock.Lock()
-	defer wal.lock.Unlock()
+	// wal.lock.Lock()
+	// defer wal.lock.Unlock()
 	err := wal.fileHandle.Truncate(0)
 	if err != nil {
 		log.Println("failed to truncate WAL file, error: ", err.Error())
-
 	}
 	wal.fileHandle.Sync()
 	_, err = wal.fileHandle.Seek(0, 0)
@@ -234,8 +232,8 @@ func flushWAL() {
 
 // Section of functions that contain code to clean the memory store setup
 func closeWAL() {
-	wal.lock.Lock()
-	defer wal.lock.Unlock()
+	// wal.lock.Lock()
+	// defer wal.lock.Unlock()
 
 	wal.fileHandle.Close()
 }
@@ -330,7 +328,6 @@ func loadWAL() error {
 			kv.Hash = 0
 
 			hash, err := utility.HashStruct(kv)
-
 			if err != nil {
 				log.Println("unable to calculate hash for wal request present on disk, assuming corruption from this point, error: ", err.Error())
 				break
@@ -350,13 +347,13 @@ func loadWAL() error {
 	}
 
 	// open the file handle to WAL
-	wal.fileHandle, err = os.OpenFile(utility.WALName, os.O_TRUNC|os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	wal.fileHandle, err = os.OpenFile(utility.WALName, os.O_TRUNC|os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		log.Println("failed to create a new wal file in append mode, error: ", err.Error())
 		return err
 	}
 	wal.walEncoder = json.NewEncoder(wal.fileHandle)
-	wal.lock = sync.Mutex{}
+	// wal.lock = sync.Mutex{}
 	// wal.syncCounter = 0
 	return nil
 }
