@@ -6,10 +6,8 @@ import (
 	"io"
 	"log"
 	"os"
-	"regexp"
 	"slices"
 	"sort"
-	// "sync"
 
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
@@ -252,39 +250,41 @@ func flushManifest() error {
 	// handle file create
 	f, err = os.Create(utility.ManifestName)
 	if err != nil {
+		log.Println("failed to create manifest file")
 		return err
 	}
 	defer f.Close()
+
 	marshalledOut, err := json.MarshalIndent(manifest, "", " ")
 	if err != nil {
+		log.Println("failed to marshal manifest content")
 		return err
 	}
 	_, err = f.Write(marshalledOut)
 	if err != nil {
+		log.Println("failed to write marshalled content to disk")
 		return err
 	}
 
-	f.Sync()
-
-	return nil
+	return f.Sync()
 }
 
 // Section of functions that contain code to setup the memory store
 func loadManifest() error {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		log.Println("failed to list files in current directory")
+		return err
+	}
 	bytes, err := os.ReadFile(utility.ManifestName)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			return err
-		}
-		entries, err := os.ReadDir(".")
-		if err != nil {
+			log.Println("failed to read manifest file")
 			return err
 		}
 
-		re := regexp.MustCompile(`^sst-\d+\.json$`)
 		for _, entry := range entries {
-			isSSTFile := re.MatchString(entry.Name())
-			if isSSTFile {
+			if utility.IsSSTFile(entry.Name()) {
 				manifest = append(manifest, entry.Name())
 			}
 		}
@@ -298,7 +298,16 @@ func loadManifest() error {
 	} else {
 		err = json.Unmarshal(bytes, &manifest)
 		if err != nil {
+			log.Println("failed to unmarshal manifest file")
 			return err
+		}
+		for _, entry := range entries {
+			if utility.IsSSTFile(entry.Name()) && utility.ExtractSSTFileNumber(entry.Name()) >= len(manifest) {
+				err = os.Remove(entry.Name())
+				if err != nil {
+					log.Printf("failed to clean up dangling sst file - %s, error: %s\n", entry.Name(), err.Error())
+				}
+			}
 		}
 	}
 	return nil

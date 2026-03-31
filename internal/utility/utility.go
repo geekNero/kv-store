@@ -3,6 +3,7 @@ package utility
 import (
 	"encoding/json"
 	"hash/crc32"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -24,6 +25,11 @@ func ExtractSSTFileNumber(name string) int {
 		return -1
 	}
 	return x
+}
+
+func IsSSTFile(name string) bool {
+	re := regexp.MustCompile(`^sst-\d+\.json$`)
+	return re.MatchString(name)
 }
 
 func HashStruct(v any) (uint32, error) {

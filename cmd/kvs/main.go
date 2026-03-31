@@ -28,7 +28,7 @@ func main() {
 
 	err := memorystore.SetupMemoryStore()
 	if err != nil {
-		log.Fatal("failed to setup memory store, error: ", err.Error())
+		log.Fatal("failed to setup memory store")
 	}
 
 	mux := http.NewServeMux()

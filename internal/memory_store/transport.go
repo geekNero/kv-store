@@ -62,9 +62,15 @@ func SetupMemoryStore() error {
 
 	err := loadWAL()
 	if err != nil {
+		log.Println("failed to loadWAL file, error: ", err.Error())
 		return err
 	}
-	return loadManifest()
+	err = loadManifest()
+	if err != nil {
+		log.Println("failed to load Manifest, error: ", err.Error())
+		return err
+	}
+	return nil
 }
 
 func CloseMemoryStore() {

@@ -34,6 +34,11 @@ func cleanWAL() {
 	_ = os.Remove(utility.WALName)
 }
 
+func cleanManifest() {
+	manifest = []string{}
+	_ = os.Remove(utility.ManifestName)
+}
+
 func Test_flushMemTable(t *testing.T) {
 	type args struct {
 		inputManifest []string
@@ -579,4 +584,137 @@ func Test_loadWALTruncation(t *testing.T) {
 	}
 
 	cleanWAL()
+}
+
+func Test_loadManifest(t *testing.T) {
+	tests := []struct {
+		name      string // description of this test case
+		wantErr   bool
+		setup     func()
+		want      []string
+		postCheck func(t *testing.T)
+	}{
+		{
+			name:    "T1-CleanManifest_NoDanglingSSTs",
+			wantErr: false,
+			setup: func() {
+				memStore = map[string]string{
+					"key1": "val1",
+					"key2": "val2",
+					"json": "yay",
+				}
+				flushMemTable()
+				memStore = map[string]string{
+					"key3": "val3",
+					"key1": "Val1",
+					"txt":  "val-txt",
+				}
+				flushMemTable()
+				flushManifest()
+			},
+			want: []string{
+				"sst-0.json",
+				"sst-1.json",
+			},
+		},
+		{
+			name:    "T2-NoManifest_WithDanglingSSTs",
+			wantErr: false,
+			setup: func() {
+				memStore = map[string]string{
+					"key1": "val1",
+					"key2": "val2",
+					"json": "yay",
+				}
+				flushMemTable()
+				memStore = map[string]string{
+					"key3": "val3",
+					"key1": "Val1",
+					"txt":  "val-txt",
+				}
+				flushMemTable()
+				cleanManifest()
+			},
+			// In case of no manifest, the SSTs are considered as source of truth
+			want: []string{
+				"sst-0.json",
+				"sst-1.json",
+			},
+		},
+		{
+			name:    "T3-CleanManifest_WithDanglingSSTs",
+			wantErr: false,
+			setup: func() {
+				memStore = map[string]string{
+					"key1": "val1",
+					"key2": "val2",
+					"json": "yay",
+				}
+				flushMemTable()
+				memStore = map[string]string{
+					"key3": "val3",
+					"key1": "Val1",
+					"txt":  "val-txt",
+				}
+				flushMemTable()
+				flushManifest()
+				memStore = map[string]string{
+					"key3": "val3",
+					"key1": "Val1",
+				}
+				flushMemTable()
+				manifest = []string{}
+			},
+			want: []string{
+				"sst-0.json",
+				"sst-1.json",
+			},
+			postCheck: func(t *testing.T) {
+				_, err := os.Stat("sst-2.json")
+
+				if err == nil {
+					t.Error("dangling sst present")
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// start with clean manifest and sst files
+			cleanManifest()
+			cleanSSTFiles()
+			defer cleanManifest()
+			defer cleanSSTFiles()
+			defer cleanWAL()
+
+			if tt.setup != nil {
+				tt.setup()
+			}
+			gotErr := loadManifest()
+			if gotErr != nil {
+				if !tt.wantErr {
+					t.Errorf("loadManifest() failed: %v", gotErr)
+				}
+				return
+			}
+			if tt.wantErr {
+				t.Fatal("loadManifest() succeeded unexpectedly")
+			}
+
+			if len(tt.want) != len(manifest) {
+				t.Errorf("manifest lengths don't match, got: %d, want: %d", len(tt.want), len(manifest))
+			}
+
+			for index, entry := range tt.want {
+				if entry != manifest[index] {
+					t.Errorf("entry in manifest does not match expected entry, found: %s, expected: %s", manifest[index], entry)
+				}
+			}
+
+			if tt.postCheck != nil {
+				tt.postCheck(t)
+			}
+
+		})
+	}
 }
