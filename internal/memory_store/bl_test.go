@@ -45,10 +45,10 @@ func Test_flushMemTable(t *testing.T) {
 		sstFileName   string
 	}
 
-	memTableGenerator := func() map[string]string {
-		testMemTable := map[string]string{
-			"key1": "val1",
-			"key2": "val2",
+	memTableGenerator := func() map[string]value {
+		testMemTable := map[string]value{
+			"key1": {value: "val1"},
+			"key2": {value: "val2"},
 		}
 		return testMemTable
 	}
@@ -96,7 +96,7 @@ func Test_flushMemTable(t *testing.T) {
 				sort.Strings(keys)
 				memTableSlice := make([]spec.PutRequest, 0, len(keys))
 				for _, k := range keys {
-					memTableSlice = append(memTableSlice, spec.PutRequest{Key: k, Value: memTableGenerator()[k]})
+					memTableSlice = append(memTableSlice, spec.PutRequest{Key: k, Value: memTableGenerator()[k].value})
 				}
 				if diff := cmp.Diff(sstData, memTableSlice); diff != "" {
 					t.Errorf("failed: data don't match\n %s", diff)
@@ -113,7 +113,7 @@ func Test_flushMemTable(t *testing.T) {
 
 func Test_checkSST(t *testing.T) {
 	cleanupFunc := func() {
-		memStore = make(map[string]string)
+		memStore = make(map[string]value)
 		manifest = make([]string, 0)
 		negativeCache = make([]negativeCacheKey, negativeCacheLimit)
 		negativeCachePointer = 0
@@ -136,13 +136,13 @@ func Test_checkSST(t *testing.T) {
 			want2:   true,
 			wantErr: false,
 			prepareTest: func() {
-				memStore = map[string]string{
+				memStore = map[string]value{
 					"key1": "val1",
 					"key2": "val2",
 					"json": "yay",
 				}
 				flushMemTable()
-				memStore = map[string]string{
+				memStore = map[string]value{
 					"key3": "val3",
 					"key1": "Val1",
 				}
@@ -157,13 +157,13 @@ func Test_checkSST(t *testing.T) {
 			want2:   false,
 			wantErr: false,
 			prepareTest: func() {
-				memStore = map[string]string{
+				memStore = map[string]value{
 					"key1": "val1",
 					"key2": "val2",
 					"json": "yay",
 				}
 				flushMemTable()
-				memStore = map[string]string{
+				memStore = map[string]value{
 					"key3": "val3",
 					"key1": "Val1",
 				}
@@ -178,19 +178,19 @@ func Test_checkSST(t *testing.T) {
 			want2:   false,
 			wantErr: false,
 			prepareTest: func() {
-				memStore = map[string]string{
+				memStore = map[string]value{
 					"key1": "val1",
 					"key2": "val2",
 					"json": "yay",
 				}
 				flushMemTable()
-				memStore = map[string]string{
+				memStore = map[string]value{
 					"key3": "val3",
 					"key1": "Val1",
 					"txt":  "val-txt", // adding for verification
 				}
 				flushMemTable()
-				memStore = map[string]string{
+				memStore = map[string]value{
 					"key3": "val3",
 					"key1": "Val1",
 				}
@@ -714,7 +714,6 @@ func Test_loadManifest(t *testing.T) {
 			if tt.postCheck != nil {
 				tt.postCheck(t)
 			}
-
 		})
 	}
 }
