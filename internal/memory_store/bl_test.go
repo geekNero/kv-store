@@ -137,14 +137,14 @@ func Test_checkSST(t *testing.T) {
 			wantErr: false,
 			prepareTest: func() {
 				memStore = map[string]Value{
-					"key1": Value{Value: "val1"},
-					"key2": Value{Value: "val2"},
-					"json": Value{Value: "yay"},
+					"key1": {Value: "val1"},
+					"key2": {Value: "val2"},
+					"json": {Value: "yay"},
 				}
 				flushMemTable()
 				memStore = map[string]Value{
-					"key3": Value{Value: "val3"},
-					"key1": Value{Value: "Val1"},
+					"key3": {Value: "val3"},
+					"key1": {Value: "Val1"},
 				}
 				flushMemTable()
 			},
