@@ -12,12 +12,17 @@ type negativeCacheKey struct {
 	man int
 }
 
+type Value struct {
+	Value     string
+	Tombstone bool
+}
+
 const (
 	negativeCacheLimit = 100
 )
 
 var (
-	memStore             = make(map[string]string)
+	memStore             = make(map[string]Value)
 	manifest             = make([]string, 0)
 	negativeCache        = make([]negativeCacheKey, negativeCacheLimit)
 	negativeCachePointer = 0
@@ -27,7 +32,10 @@ var (
 // handlePut sets the value for the provided key directly in the in-memory map.
 // If the map size grows beyond the max table size, the map is flushed out.
 func handlePut(r *spec.PutRequest) bool {
-	memStore[r.Key] = r.Value
+	memStore[r.Key] = Value{
+		Value:     r.Value,
+		Tombstone: false,
+	}
 
 	if len(memStore) >= utility.MemTableSize {
 		flushMemTable()
@@ -60,5 +68,9 @@ func handleGet(key string) (string, bool) {
 		}
 		return value, exists
 	}
-	return value, true
+	return value.Value, true
+}
+
+func handleDelete(key string) bool {
+	return false
 }

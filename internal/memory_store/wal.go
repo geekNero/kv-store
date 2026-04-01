@@ -2,6 +2,7 @@ package memorystore
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
@@ -80,7 +81,7 @@ func loadWAL() error {
 			offset := decoder.InputOffset()
 			err := decoder.Decode(&kv)
 			if err != nil {
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					break
 				}
 				log.Println("decode failed: ", err.Error())
@@ -108,7 +109,7 @@ func loadWAL() error {
 			if kv.Operation == utility.PUT {
 				// we cannot use handlePut as handlePut also writes to WAL and we enter a loop.
 				// handlePut(&spec.PutRequest{Key: kv.Key, Value: kv.Value})
-				memStore[kv.Key] = kv.Value
+				memStore[kv.Key] = Value{Value: kv.Value, Tombstone: false}
 			}
 		}
 	}

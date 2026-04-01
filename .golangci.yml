@@ -1,0 +1,110 @@
+version: "2"
+
+run:
+  timeout: 5m         # Maximum run time for golangci-lint
+  tests: true         # Also lint *_test.go files
+  fast: false         # Set true for speed, false for full coverage
+
+linters:
+  enable:
+    # --- Core correctness & safety ---
+    - govet           # Reports suspicious constructs (shadowed vars, etc.)
+    - staticcheck     # Comprehensive static analysis
+    - ineffassign     # Detects unused (ineffectual) assignments
+    - unused          # Finds unused consts, vars, funcs, types
+    - errorlint       # Ensures idiomatic error handling
+    - errname         # Enforces Go naming for error variables
+
+    # --- Security & reliability ---
+    - bodyclose       # Detects unclosed HTTP response bodies
+    - sqlclosecheck   # Ensures sql.Rows/Stmt are closed
+    - rowserrcheck    # Ensures database/sql row errors are checked
+
+
+    # --- Style & maintainability ---
+    - prealloc        # Suggests slice preallocation when possible
+    - goconst         # Finds repeated strings/consts
+
+    # --- Additional correctness ---
+    - protogetter     # Ensures proto-generated code uses getters
+    - unconvert       # Detects unnecessary type conversions
+    - durationcheck   # Detects incorrect time.Duration usage
+
+  disable:
+    # Disabled linters (reduce noise, or enforce team-specific standards differently)
+    - funlen          # Ignore function length check
+    - gocritic        # Too noisy / strict rules
+    - lll             # Ignore line length check
+    - godox           # Ignore TODO/FIXME comments
+    - nakedret        # Ignore naked return warnings
+    - wsl             # Ignore whitespace style linter
+    - errcheck        # Ignore error check
+    - forbidigo       # Forbid dangerous calls (fmt.Print, os.Exit, etc.)
+    - depguard        # Forbid unsafe or unapproved dependencies
+    - gosec           # Security checks (weak crypto, hardcoded creds, injections, etc.)
+    - gocyclo         # Reports high cyclomatic complexity
+
+
+linters-settings:
+  gocyclo:
+    min-complexity: 10   # Only flag functions with complexity > 10
+
+  goimports:
+    local-prefixes: git.druva.org/druva.com  # Treat this as local for import grouping
+
+  revive:
+    severity: error
+    rules:
+      - name: unusedParameter   # Flags unused function parameters
+
+  gosec:
+    severity: medium            # Report medium+ severity issues (not just high)
+    confidence: high            # Only high-confidence findings
+
+  govet:
+    enable:                     # Enable specific govet analyzers
+      - printf
+      - shadow
+      - loopclosure
+
+  staticcheck:
+    checks: ["all", "-ST1000", "-ST1003"]  
+    # all: enable all checks
+    # -ST1000: ignore "package comment missing"
+    # -ST1003: ignore "bad constant naming"
+
+  errorlint:
+    errorf: true       # Check for wrong use of fmt.Errorf
+    asserts: true      # Check for incorrect error type assertions
+
+  depguard:
+    rules:
+      main:
+        list-type: blacklist
+        packages:
+          - crypto/md5
+          - crypto/sha1
+        message: "Do not use weak cryptography, use crypto/sha256 or stronger"
+
+  forbidigo:
+    forbid:
+      - 'fmt\.Print.*'   # Block fmt.Print*, fmt.Println (use structured logger instead)
+      - 'os\.Exit'       # Block os.Exit (prefer graceful shutdown)
+
+issues:
+  max-issues-per-linter: 0   # 0 = unlimited
+  max-same-issues: 0         # 0 = unlimited
+  new: false                 # Report all issues, not just new ones
+
+  exclude-dirs:
+    - vendor                 # Skip vendor code
+    - testdata               # Skip testdata files
+    - (^|/)example/          # Skip example directories anywhere in tree
+    - (^|/)build/            # Skip build directories anywhere in tree
+
+  exclude-files:
+    - "mock_.*.go"           # Ignore generated mocks
+    - ".*_generated.go"      # Ignore auto-generated Go files
+
+  severity:
+    default-severity: error  # Treat all issues as errors (not warnings)

@@ -53,6 +53,13 @@ func MemoryStoreHandler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
 
+	case http.MethodDelete:
+		if handleDelete(key) {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}

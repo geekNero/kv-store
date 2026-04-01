@@ -31,7 +31,7 @@ func flushMemTable() bool {
 	// TODO: We can probably reserve this page.
 	flushOut := make([]spec.PutRequest, 0, len(memStore))
 	for _, key := range keys {
-		flushOut = append(flushOut, spec.PutRequest{Key: key, Value: memStore[key]})
+		flushOut = append(flushOut, spec.PutRequest{Key: key, Value: memStore[key].Value})
 	}
 
 	marshalledOut, err := json.MarshalIndent(flushOut, "", " ")
@@ -49,7 +49,7 @@ func flushMemTable() bool {
 		log.Printf("failed to sync SSTFile - %s, error: %s", sstName, err.Error())
 	}
 
-	memStore = make(map[string]string)
+	memStore = make(map[string]Value)
 	// need to test if reallocating is faster or clearing each entry is faster.
 	manifest = append(manifest, sstName)
 
