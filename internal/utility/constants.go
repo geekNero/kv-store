@@ -9,5 +9,6 @@ const (
 	WALName      = "wal.db"
 
 	// Operations
-	PUT = "put"
+	PUT    = "put"
+	DELETE = "deleted"
 )

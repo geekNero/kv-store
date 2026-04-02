@@ -9,6 +9,19 @@ import (
 	"sort"
 )
 
+func deleteMemtableEntry(key string) bool {
+
+	entry, exists := memStore[key]
+	if !exists {
+		return false
+	}
+
+	entry.Tombstone = true
+	memStore[key] = entry
+
+	return true
+}
+
 func flushMemTable() bool {
 	sstid := len(manifest)
 	sstName := fmt.Sprintf("sst-%d.json", sstid)

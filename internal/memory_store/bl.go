@@ -72,5 +72,15 @@ func handleGet(key string) (string, bool) {
 }
 
 func handleDelete(key string) bool {
-	return false
+	// first mark the entry deleted in memtable
+	if !deleteMemtableEntry(key) {
+		return false
+	}
+
+	walWrite(&spec.WALRequest{
+		Key:       key,
+		Operation: utility.DELETE,
+	})
+
+	return true
 }
