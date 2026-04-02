@@ -34,7 +34,7 @@ func flushMemTable() bool {
 
 	defer f.Close()
 
-	// Convert the mem-table into a list of PutRequests, to be marshalled out.
+	// Convert the mem-table into a list of PutRequests and DeleteRequests, to be marshalled out.
 	keys := make([]string, 0, len(memStore))
 	for key := range memStore {
 		keys = append(keys, key)
@@ -42,9 +42,19 @@ func flushMemTable() bool {
 	sort.Strings(keys)
 
 	// TODO: We can probably reserve this page.
-	flushOut := make([]spec.PutRequest, 0, len(memStore))
+	flushOut := make([]spec.SSTEntry, 0, len(memStore))
 	for _, key := range keys {
-		flushOut = append(flushOut, spec.PutRequest{Key: key, Value: memStore[key].Value})
+		entry := memStore[key]
+		sstEntry := spec.SSTEntry{
+			Key:       key,
+			Tombstone: entry.Tombstone,
+		}
+
+		if !entry.Tombstone {
+			sstEntry.Value = &entry.Value
+		}
+
+		flushOut = append(flushOut, sstEntry)
 	}
 
 	marshalledOut, err := json.MarshalIndent(flushOut, "", " ")

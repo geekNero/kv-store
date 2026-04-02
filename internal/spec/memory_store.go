@@ -15,3 +15,9 @@ type WALRequest struct {
 	Operation string `json:"op"`
 	Hash      uint32 `json:"hash,omitempty"`
 }
+
+type SSTEntry struct {
+	Key       string  `json:"key"`
+	Value     *string `json:"value,omitempty"`
+	Tombstone bool    `json:"deleted,omitempty"`
+}
