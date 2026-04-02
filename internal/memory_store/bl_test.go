@@ -137,14 +137,14 @@ func Test_checkSST(t *testing.T) {
 			wantErr: false,
 			prepareTest: func() {
 				memStore = map[string]Value{
-					"key1": Value{Value: "val1"},
-					"key2": Value{Value: "val2"},
-					"json": Value{Value: "yay"},
+					"key1": {Value: "val1"},
+					"key2": {Value: "val2"},
+					"json": {Value: "yay"},
 				}
 				flushMemTable()
 				memStore = map[string]Value{
-					"key3": Value{Value: "val3"},
-					"key1": Value{Value: "Val1"},
+					"key3": {Value: "val3"},
+					"key1": {Value: "Val1"},
 				}
 				flushMemTable()
 			},
@@ -158,14 +158,14 @@ func Test_checkSST(t *testing.T) {
 			wantErr: false,
 			prepareTest: func() {
 				memStore = map[string]Value{
-					"key1": Value{Value: "val1"},
-					"key2": Value{Value: "val2"},
-					"json": Value{Value: "yay"},
+					"key1": {Value: "val1"},
+					"key2": {Value: "val2"},
+					"json": {Value: "yay"},
 				}
 				flushMemTable()
 				memStore = map[string]Value{
-					"key3": Value{Value: "val3"},
-					"key1": Value{Value: "Val1"},
+					"key3": {Value: "val3"},
+					"key1": {Value: "Val1"},
 				}
 				flushMemTable()
 			},
@@ -179,20 +179,20 @@ func Test_checkSST(t *testing.T) {
 			wantErr: false,
 			prepareTest: func() {
 				memStore = map[string]Value{
-					"key1": Value{Value: "val1"},
-					"key2": Value{Value: "val2"},
-					"json": Value{Value: "yay"},
+					"key1": {Value: "val1"},
+					"key2": {Value: "val2"},
+					"json": {Value: "yay"},
 				}
 				flushMemTable()
 				memStore = map[string]Value{
-					"key3": Value{Value: "val3"},
-					"key1": Value{Value: "Val1"},
-					"txt":  Value{Value: "val-txt"}, // adding for verification
+					"key3": {Value: "val3"},
+					"key1": {Value: "Val1"},
+					"txt":  {Value: "val-txt"}, // adding for verification
 				}
 				flushMemTable()
 				memStore = map[string]Value{
-					"key3": Value{Value: "val3"},
-					"key1": Value{Value: "Val1"},
+					"key3": {Value: "val3"},
+					"key1": {Value: "Val1"},
 				}
 				flushMemTable()
 				putNegativeCache("txt", 1)
@@ -511,7 +511,7 @@ func Test_loadWAL(t *testing.T) {
 				walWrite(&spec.WALRequest{Key: "k2", Value: "v2", Operation: utility.PUT})
 				closeWAL()
 			},
-			want: map[string]Value{"k1": Value{Value: "v1", Tombstone: false}, "k2": Value{Value: "v2", Tombstone: false}},
+			want: map[string]Value{"k1": {Value: "v1", Tombstone: false}, "k2": {Value: "v2", Tombstone: false}},
 		},
 		{
 			name: "T2-CorruptHash",
@@ -528,7 +528,7 @@ func Test_loadWAL(t *testing.T) {
 				f.Write([]byte("corruption"))
 				f.Close()
 			},
-			want: map[string]Value{"k1": Value{Value: "v1", Tombstone: false}}, // Should stop at corruption or skip the corrupt entry
+			want: map[string]Value{"k1": {Value: "v1", Tombstone: false}}, // Should stop at corruption or skip the corrupt entry
 		},
 	}
 	for _, tt := range tests {
@@ -599,15 +599,15 @@ func Test_loadManifest(t *testing.T) {
 			wantErr: false,
 			setup: func() {
 				memStore = map[string]Value{
-					"key1": Value{Value: "val1"},
-					"key2": Value{Value: "val2"},
-					"json": Value{Value: "yay"},
+					"key1": {Value: "val1"},
+					"key2": {Value: "val2"},
+					"json": {Value: "yay"},
 				}
 				flushMemTable()
 				memStore = map[string]Value{
-					"key3": Value{Value: "val3"},
-					"key1": Value{Value: "Val1"},
-					"txt":  Value{Value: "val-txt"},
+					"key3": {Value: "val3"},
+					"key1": {Value: "Val1"},
+					"txt":  {Value: "val-txt"},
 				}
 				flushMemTable()
 				flushManifest()
@@ -622,15 +622,15 @@ func Test_loadManifest(t *testing.T) {
 			wantErr: false,
 			setup: func() {
 				memStore = map[string]Value{
-					"key1": Value{Value: "val1"},
-					"key2": Value{Value: "val2"},
-					"json": Value{Value: "yay"},
+					"key1": {Value: "val1"},
+					"key2": {Value: "val2"},
+					"json": {Value: "yay"},
 				}
 				flushMemTable()
 				memStore = map[string]Value{
-					"key3": Value{Value: "val3"},
-					"key1": Value{Value: "Val1"},
-					"txt":  Value{Value: "val-txt"},
+					"key3": {Value: "val3"},
+					"key1": {Value: "Val1"},
+					"txt":  {Value: "val-txt"},
 				}
 				flushMemTable()
 				cleanManifest()
@@ -646,21 +646,21 @@ func Test_loadManifest(t *testing.T) {
 			wantErr: false,
 			setup: func() {
 				memStore = map[string]Value{
-					"key1": Value{Value: "val1"},
-					"key2": Value{Value: "val2"},
-					"json": Value{Value: "yay"},
+					"key1": {Value: "val1"},
+					"key2": {Value: "val2"},
+					"json": {Value: "yay"},
 				}
 				flushMemTable()
 				memStore = map[string]Value{
-					"key3": Value{Value: "val3"},
-					"key1": Value{Value: "Val1"},
-					"txt":  Value{Value: "val-txt"},
+					"key3": {Value: "val3"},
+					"key1": {Value: "Val1"},
+					"txt":  {Value: "val-txt"},
 				}
 				flushMemTable()
 				flushManifest()
 				memStore = map[string]Value{
-					"key3": Value{Value: "val3"},
-					"key1": Value{Value: "Val1"},
+					"key3": {Value: "val3"},
+					"key1": {Value: "Val1"},
 				}
 				flushMemTable()
 				manifest = []string{}
@@ -714,7 +714,6 @@ func Test_loadManifest(t *testing.T) {
 			if tt.postCheck != nil {
 				tt.postCheck(t)
 			}
-
 		})
 	}
 }
