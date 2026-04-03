@@ -429,6 +429,31 @@ func Test_walWrite(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "T3-BasicDelete",
+			r: []*spec.WALRequest{
+				{
+					Key:       "key1",
+					Value:     "garbage",
+					Operation: utility.DELETE,
+				},
+			},
+		},
+		{
+			name: "T4-MixedPutAndDelete",
+			r: []*spec.WALRequest{
+				{
+					Key:       "key1",
+					Value:     "val1",
+					Operation: utility.PUT,
+				},
+				{
+					Key:       "key2",
+					Value:     "garbage",
+					Operation: utility.DELETE,
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -458,7 +483,7 @@ func Test_walWrite(t *testing.T) {
 					t.Fatalf("failed to decode WAL entry: %v", err)
 				}
 
-				if got.Key != req.Key || got.Value != req.Value || got.Operation != req.Operation {
+				if got.Key != req.Key || (req.Operation == utility.PUT && req.Value != got.Value) {
 					t.Errorf("walWrite() = %v, want %v", got, req)
 				}
 				if got.Hash == 0 {

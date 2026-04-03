@@ -27,6 +27,7 @@ var (
 	negativeCache        = make([]negativeCacheKey, negativeCacheLimit)
 	negativeCachePointer = 0
 	wal                  WAL
+	mutationCounter      = 0
 )
 
 // handlePut sets the value for the provided key directly in the in-memory map.
@@ -50,6 +51,12 @@ func handlePut(r *spec.PutRequest) bool {
 			Value:     r.Value,
 			Operation: utility.PUT,
 		})
+	}
+
+	mutationCounter++
+
+	if mutationCounter > utility.CompactionTrigger {
+		triggerCompaction()
 	}
 
 	return true
@@ -81,6 +88,12 @@ func handleDelete(key string) bool {
 		Key:       key,
 		Operation: utility.DELETE,
 	})
+
+	mutationCounter++
+
+	if mutationCounter > utility.CompactionTrigger {
+		triggerCompaction()
+	}
 
 	return true
 }
