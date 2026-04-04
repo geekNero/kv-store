@@ -3,9 +3,10 @@ package memorystore
 import (
 	"encoding/json"
 	"fmt"
-	"kv_store/internal/spec"
 	"log"
 	"os"
+
+	"kv_store/internal/spec"
 )
 
 type decodeState string
@@ -98,9 +99,27 @@ func (iterator *fileIterator) close() error {
 	return nil
 }
 
-// Let's return an error for our compaction failures and break the server when it happens.
-func triggerCompaction() error {
+/*
+In the compaciton process, we extract the latest representaion of each key value pair and
+create new SSTs that only represent those. In doing so, we rewrite the manifest as well.
+We could reset the numbering of SSTs or we could continue it, our operations won't be impacted either
+way as long as the manifest is consistent.
 
-	// fileIterators
+Before compaction, the higher the SST number is, newer are the entries it has.
+After compaction, the higher SSTs simply contain lexiographically decreasing key value pairs.
+*/
+func triggerCompaction() error {
+	// create iterators for all files in manfiest
+	iterables := make([]*fileIterator, 0, len(manifest))
+
+	for index, file := range manifest {
+		f, err := os.Open(file)
+		if err != nil {
+			log.Printf("failed to open file %s during compaction, error: %s", file, err.Error())
+			return err
+		}
+		iterables[index] = NewFileIterator(f)
+	}
+
 	return nil
 }

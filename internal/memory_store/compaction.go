@@ -1,10 +1,10 @@
 package memorystore
 
 type SSTEntry struct {
-	key       string
-	value     string
-	operation string
-	sstID     int
+	key     string
+	value   string
+	deleted bool
+	sstID   int
 }
 
 type MinMergeHeap []*SSTEntry
