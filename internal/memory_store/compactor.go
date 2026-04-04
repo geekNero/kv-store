@@ -70,13 +70,13 @@ func (iterator *fileIterator) nextItem() *spec.SSTEntry {
 	}
 
 	if iterator.decoder.More() {
-		var entry *spec.SSTEntry
-		err := iterator.decoder.Decode(entry)
+		entry := spec.SSTEntry{}
+		err := iterator.decoder.Decode(&entry)
 		if err != nil {
 			log.Println("failed to decode next item, error: ", err.Error())
 			return nil
 		}
-		return entry
+		return &entry
 	}
 
 	// mark it done if no more json items remain for parsing
@@ -126,14 +126,19 @@ func triggerCompaction() error {
 	// each sst should always have atleast one entry, and if it does not then something went
 	// wrong with the sst.
 	h := MinMergeHeap{}
-	openSSTs := 0
 
-	for index, file := range manifest {
+	for _, file := range manifest {
 		iterator := NewFileIterator(file)
 		if iterator == nil {
 			continue
 		}
+		err := iterator.open()
+		if err != nil {
+			log.Println("error when attempting to open iterator, error: ", err.Error())
+			continue
+		}
 		iterables = append(iterables, iterator)
+		index := len(iterables) - 1
 
 		entry := iterables[index].nextItem()
 		if entry == nil {
@@ -141,7 +146,6 @@ func triggerCompaction() error {
 			iterables[index].close()
 			continue
 		}
-		openSSTs++
 
 		sstID := utility.ExtractSSTFileNumber(file)
 		h.Push(&HeapEntry{
@@ -162,7 +166,6 @@ func triggerCompaction() error {
 		if iterables[index].decodeState == decoding {
 			entry := iterables[index].nextItem()
 			if entry == nil {
-				openSSTs--
 				err := iterables[index].close()
 				if err != nil {
 					log.Println("failed to close exhausted sst file: ", iterables[index].fileName)
@@ -178,8 +181,8 @@ func triggerCompaction() error {
 		}
 	}
 
-	for openSSTs > 0 {
-		top := heap.Pop(&h).(HeapEntry)
+	for h.Len() > 0 {
+		top := heap.Pop(&h).(*HeapEntry)
 		if !top.Tombstone {
 			compactedData = append(compactedData, top.SSTEntry)
 		}
@@ -188,6 +191,7 @@ func triggerCompaction() error {
 		addNextItemtoHeap(top.index)
 
 		// flush into an sst file if data has more than MemTableSize entries.
+		// TODO: stream this data to the new SST file instead of writing it all at once.
 		if len(compactedData) >= utility.MemTableSize {
 			sstName, err := writeSST(compactedData)
 			if err != nil {
@@ -200,7 +204,7 @@ func triggerCompaction() error {
 
 		// flush out the older versions of sst keys
 		for h.Len() > 0 && h.Peek().Key == top.Key {
-			disposableEntry := heap.Pop(&h).(HeapEntry)
+			disposableEntry := heap.Pop(&h).(*HeapEntry)
 			addNextItemtoHeap(disposableEntry.index)
 		}
 	}
@@ -212,6 +216,14 @@ func triggerCompaction() error {
 			return err
 		}
 		newManifest = append(newManifest, sstName)
+	}
+
+	// delete older ssts after the new ssts have been written to.
+	for _, file := range manifest {
+		err := os.Remove(file)
+		if err != nil {
+			log.Printf("failed to purge older sst: %s after compaction, error: %s", file, err.Error())
+		}
 	}
 
 	manifest = newManifest
