@@ -37,12 +37,13 @@ func cleanWAL() {
 func cleanManifest() {
 	manifest = []string{}
 	_ = os.Remove(utility.ManifestName)
+	nextSSTID = 0
 }
 
 func Test_flushMemTable(t *testing.T) {
 	type args struct {
-		inputManifest []string
-		sstFileName   string
+		inputNextSSTID int
+		sstFileName    string
 	}
 
 	memTableGenerator := func() map[string]Value {
@@ -60,22 +61,19 @@ func Test_flushMemTable(t *testing.T) {
 	}{
 		{
 			name: "T1-No_Manifest_Files",
-			args: args{inputManifest: []string{}, sstFileName: "sst-0.json"},
+			args: args{inputNextSSTID: 0, sstFileName: "sst-0.json"},
 			want: true,
 		},
 		{
 			name: "T2-Few_Manifest_Files",
-			args: args{inputManifest: []string{
-				"sst-0.json",
-				"sst-1.json",
-			}, sstFileName: "sst-2.json"},
+			args: args{inputNextSSTID: 2, sstFileName: "sst-2.json"},
 			want: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			memStore = memTableGenerator()
-			manifest = tt.inputManifest
+			nextSSTID = tt.inputNextSSTID
 			got := flushMemTable()
 			if got == tt.want == true {
 				sstFile, err := os.ReadFile(tt.sstFileName)
@@ -114,9 +112,9 @@ func Test_flushMemTable(t *testing.T) {
 func Test_checkSST(t *testing.T) {
 	cleanupFunc := func() {
 		memStore = make(map[string]Value)
-		manifest = make([]string, 0)
 		negativeCache = make([]negativeCacheKey, negativeCacheLimit)
 		negativeCachePointer = 0
+		cleanManifest()
 		cleanSSTFiles()
 	}
 
@@ -141,6 +139,9 @@ func Test_checkSST(t *testing.T) {
 					"key2": {Value: "val2"},
 					"json": {Value: "yay"},
 				}
+
+				// testing independency of SST number
+				nextSSTID = 2
 				flushMemTable()
 				memStore = map[string]Value{
 					"key3": {Value: "val3"},
@@ -148,7 +149,7 @@ func Test_checkSST(t *testing.T) {
 				}
 				flushMemTable()
 			},
-			postTestCheck: cleanSSTFiles,
+			postTestCheck: cleanupFunc,
 		},
 		{
 			name:    "T2_Key_Not_Present",
@@ -157,6 +158,7 @@ func Test_checkSST(t *testing.T) {
 			want2:   false,
 			wantErr: false,
 			prepareTest: func() {
+				nextSSTID = 0
 				memStore = map[string]Value{
 					"key1": {Value: "val1"},
 					"key2": {Value: "val2"},
@@ -169,7 +171,7 @@ func Test_checkSST(t *testing.T) {
 				}
 				flushMemTable()
 			},
-			postTestCheck: cleanSSTFiles,
+			postTestCheck: cleanupFunc,
 		},
 		{
 			name:    "T3_Key_Not_Present_Negative_Cache",
@@ -184,6 +186,7 @@ func Test_checkSST(t *testing.T) {
 					"json": {Value: "yay"},
 				}
 				flushMemTable()
+				nextSSTID = 3
 				memStore = map[string]Value{
 					"key3": {Value: "val3"},
 					"key1": {Value: "Val1"},
@@ -209,6 +212,7 @@ func Test_checkSST(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cleanupFunc()
+			defer cleanupFunc()
 			if tt.prepareTest != nil {
 				tt.prepareTest()
 			}

@@ -3,14 +3,16 @@ package memorystore
 import (
 	"encoding/json"
 	"fmt"
-	"kv_store/internal/spec"
 	"log"
 	"os"
 	"sort"
+
+	"kv_store/internal/spec"
 )
 
-func deleteMemtableEntry(key string) bool {
+var nextSSTID = 0
 
+func deleteMemtableEntry(key string) bool {
 	entry, exists := memStore[key]
 	if !exists {
 		return false
@@ -23,7 +25,9 @@ func deleteMemtableEntry(key string) bool {
 }
 
 func flushMemTable() bool {
-	sstid := len(manifest)
+	sstid := nextSSTID
+	nextSSTID++
+
 	sstName := fmt.Sprintf("sst-%d.json", sstid)
 
 	f, err := os.Create(sstName)
