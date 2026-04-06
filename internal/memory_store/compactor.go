@@ -218,20 +218,24 @@ func triggerCompaction() error {
 		newManifest = append(newManifest, sstName)
 	}
 
-	// delete older ssts after the new ssts have been written to.
-	for _, file := range manifest {
-		err := os.Remove(file)
-		if err != nil {
-			log.Printf("failed to purge older sst: %s after compaction, error: %s", file, err.Error())
-		}
-	}
-
+	oldManifest := manifest
 	manifest = newManifest
 	err := flushManifest()
 	if err != nil {
 		log.Println("failed to flush manifest after compaction, error: ", err.Error())
 		return err
 	}
+
+	// delete older ssts after the new ssts have been written to.
+	for _, file := range oldManifest {
+		err := os.Remove(file)
+		if err != nil {
+			log.Printf("failed to purge older sst: %s after compaction, error: %s", file, err.Error())
+		}
+	}
+
+	resetNegativeCache()
+	mutationCounter = 0
 
 	return nil
 }

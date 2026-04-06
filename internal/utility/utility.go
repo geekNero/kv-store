@@ -40,3 +40,10 @@ func HashStruct(v any) (uint32, error) {
 
 	return crc32.Checksum(data, crc32.MakeTable(crc32.Castagnoli)), nil
 }
+
+func CheckPtrStringsEqual(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}

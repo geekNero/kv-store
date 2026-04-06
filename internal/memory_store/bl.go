@@ -75,7 +75,12 @@ func handleGet(key string) (string, bool) {
 		}
 		return value, exists
 	}
+	if value.Tombstone {
+		return "", false
+	}
+
 	return value.Value, true
+
 }
 
 func handleDelete(key string) bool {

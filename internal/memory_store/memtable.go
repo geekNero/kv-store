@@ -10,7 +10,7 @@ import (
 	"kv_store/internal/spec"
 )
 
-var nextSSTID = 0
+var nextSSTID int
 
 func deleteMemtableEntry(key string) bool {
 	entry, exists := memStore[key]

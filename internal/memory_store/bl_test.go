@@ -40,18 +40,19 @@ func cleanManifest() {
 	nextSSTID = 0
 }
 
+func memTableGenerator(num int) map[string]Value {
+
+	testMemTable := map[string]Value{}
+	for i := 1; i <= num; i++ {
+		testMemTable[fmt.Sprintf("key%d", i)] = Value{Value: fmt.Sprintf("val%d", i)}
+	}
+	return testMemTable
+}
+
 func Test_flushMemTable(t *testing.T) {
 	type args struct {
 		inputNextSSTID int
 		sstFileName    string
-	}
-
-	memTableGenerator := func() map[string]Value {
-		testMemTable := map[string]Value{
-			"key1": {Value: "val1"},
-			"key2": {Value: "val2"},
-		}
-		return testMemTable
 	}
 
 	tests := []struct {
@@ -72,7 +73,7 @@ func Test_flushMemTable(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			memStore = memTableGenerator()
+			memStore = memTableGenerator(2)
 			nextSSTID = tt.inputNextSSTID
 			got := flushMemTable()
 			if got == tt.want == true {
@@ -87,14 +88,14 @@ func Test_flushMemTable(t *testing.T) {
 				}
 
 				// Convert map to slice of PutRequest for comparison
-				keys := make([]string, 0, len(memTableGenerator()))
-				for k := range memTableGenerator() {
+				keys := make([]string, 0, 2)
+				for k := range memTableGenerator(2) {
 					keys = append(keys, k)
 				}
 				sort.Strings(keys)
 				memTableSlice := make([]spec.PutRequest, 0, len(keys))
 				for _, k := range keys {
-					memTableSlice = append(memTableSlice, spec.PutRequest{Key: k, Value: memTableGenerator()[k].Value})
+					memTableSlice = append(memTableSlice, spec.PutRequest{Key: k, Value: memTableGenerator(2)[k].Value})
 				}
 				if diff := cmp.Diff(sstData, memTableSlice); diff != "" {
 					t.Errorf("failed: data don't match\n %s", diff)
@@ -199,6 +200,40 @@ func Test_checkSST(t *testing.T) {
 				}
 				flushMemTable()
 				putNegativeCache("txt", 1)
+			},
+			postTestCheck: func() {
+				val := fetchNegativeCache("txt")
+				if val.man != 2 {
+					t.Errorf("T3: manifest value not updated in negative cache: expected: %d, got: %d", 2, val.man)
+				}
+				cleanupFunc()
+			},
+		},
+		{
+			name:    "T4_Key_Deleted",
+			key:     "txt",
+			want:    "",
+			want2:   false,
+			wantErr: false,
+			prepareTest: func() {
+				memStore = map[string]Value{
+					"key1": {Value: "val1"},
+					"key2": {Value: "val2"},
+					"json": {Value: "yay"},
+				}
+				flushMemTable()
+				nextSSTID = 3
+				memStore = map[string]Value{
+					"key3": {Value: "val3"},
+					"key1": {Value: "Val1"},
+					"txt":  {Tombstone: true}, // adding for verification
+				}
+				flushMemTable()
+				memStore = map[string]Value{
+					"key3": {Value: "val3"},
+					"key1": {Value: "Val1"},
+				}
+				flushMemTable()
 			},
 			postTestCheck: func() {
 				val := fetchNegativeCache("txt")
@@ -538,9 +573,10 @@ func Test_loadWAL(t *testing.T) {
 				loadWAL()
 				walWrite(&spec.WALRequest{Key: "k1", Value: "v1", Operation: utility.PUT})
 				walWrite(&spec.WALRequest{Key: "k2", Value: "v2", Operation: utility.PUT})
+				walWrite(&spec.WALRequest{Key: "k2", Value: "", Operation: utility.DELETE})
 				closeWAL()
 			},
-			want: map[string]Value{"k1": {Value: "v1", Tombstone: false}, "k2": {Value: "v2", Tombstone: false}},
+			want: map[string]Value{"k1": {Value: "v1", Tombstone: false}, "k2": {Value: "", Tombstone: true}},
 		},
 		{
 			name: "T2-CorruptHash",

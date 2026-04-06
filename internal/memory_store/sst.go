@@ -8,22 +8,22 @@ import (
 )
 
 // if the sst file exists, loadSST returns all of the key value pairs present in it.
-func loadSST(filename string) ([]spec.PutRequest, error) {
+func loadSST(filename string) ([]spec.SSTEntry, error) {
 	sstFile, err := os.ReadFile(filename)
 	if err != nil {
 		fmt.Printf("unable to read SST-File - %s, err: %v", filename, err.Error())
 		return nil, err
 	}
 
-	sstMap := []spec.PutRequest{}
+	sstEntries := []spec.SSTEntry{}
 
-	err = json.Unmarshal(sstFile, &sstMap)
+	err = json.Unmarshal(sstFile, &sstEntries)
 	if err != nil {
 		fmt.Printf("unable to unmarshal SST-File - %s, err: %v", filename, err.Error())
 		return nil, err
 	}
 
-	return sstMap, nil
+	return sstEntries, nil
 }
 
 // checkSST searches for the keys in the SST files created by the flush operations on the local storage.
@@ -34,14 +34,19 @@ func checkSST(key string) (string, bool, error) {
 
 	// begin looking for the key from the latest page.
 	index := len(manifest) - 1
+outer:
 	for index > searchEndIndex {
+		// TODO: instead of loading the entire file, we can stream records to check through them
 		sstTable, err := loadSST(manifest[index])
 		if err != nil {
 			return "", false, err
 		}
 		for _, item := range sstTable {
 			if item.Key == key {
-				return item.Value, true, nil
+				if item.Tombstone {
+					break outer
+				}
+				return *item.Value, true, nil
 			}
 		}
 		index--
@@ -75,4 +80,8 @@ func putNegativeCache(key string, man int) {
 
 	negativeCache[negativeCachePointer%negativeCacheLimit] = negativeCacheKey{key, man}
 	negativeCachePointer++
+}
+
+func resetNegativeCache() {
+	negativeCache = make([]negativeCacheKey, negativeCacheLimit)
 }

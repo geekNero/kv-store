@@ -11,8 +11,9 @@ import (
 func flushManifest() error {
 	var f *os.File
 	var err error
+	tempFilename := "temp_" + utility.ManifestName
 	// handle file create
-	f, err = os.Create(utility.ManifestName)
+	f, err = os.Create(tempFilename)
 	if err != nil {
 		log.Println("failed to create manifest file")
 		return err
@@ -30,7 +31,18 @@ func flushManifest() error {
 		return err
 	}
 
-	return f.Sync()
+	err = f.Sync()
+	if err != nil {
+		log.Println("failed to sync temporary manifest to disk, error: ", err.Error())
+		return err
+	}
+
+	err = os.Rename(tempFilename, utility.ManifestName)
+	if err != nil {
+		log.Println("failed to rename temporary manifest, error: ", err.Error())
+		return err
+	}
+	return nil
 }
 
 // Section of functions that contain code to setup the memory store
@@ -73,6 +85,11 @@ func loadManifest() error {
 				}
 			}
 		}
+	}
+	if len(manifest) > 0 {
+		nextSSTID = utility.ExtractSSTFileNumber(manifest[len(manifest)-1]) + 1
+	} else {
+		nextSSTID = 0
 	}
 	return nil
 }

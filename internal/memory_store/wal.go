@@ -106,10 +106,13 @@ func loadWAL() error {
 				break
 			}
 
-			if kv.Operation == utility.PUT {
+			switch kv.Operation {
+			case utility.PUT:
 				// we cannot use handlePut as handlePut also writes to WAL and we enter a loop.
 				// handlePut(&spec.PutRequest{Key: kv.Key, Value: kv.Value})
 				memStore[kv.Key] = Value{Value: kv.Value, Tombstone: false}
+			case utility.DELETE:
+				memStore[kv.Key] = Value{Tombstone: true}
 			}
 		}
 	}
