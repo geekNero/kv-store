@@ -54,8 +54,8 @@ func (iterator *fileIterator) open() error {
 		return err
 	}
 
-	if bracket != "[" {
-		log.Println("first token isn't a square bracket")
+	if bracket != json.Delim('[') {
+		log.Println("first token isn't a square bracket, token found: ", bracket)
 		return fmt.Errorf("first token isn't a square bracket when opening iterator")
 	}
 
@@ -96,7 +96,7 @@ func (iterator *fileIterator) close() error {
 		return err
 	}
 
-	if bracket != "]" {
+	if bracket != json.Delim(']') {
 		log.Println("last token isn't a square bracket")
 		return fmt.Errorf("last token isn't a square bracket when closing iterator")
 	}
