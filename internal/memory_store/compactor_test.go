@@ -1,7 +1,9 @@
 package memorystore
 
 import (
+	"encoding/json"
 	"kv_store/internal/utility"
+	"os"
 	"testing"
 )
 
@@ -78,4 +80,151 @@ func TestNewFileIterator(t *testing.T) {
 		t.Fatal(err)
 	}
 
+}
+
+func Test_triggerCompaction(t *testing.T) {
+	cleanup := func() {
+		cleanManifest()
+		cleanSSTFiles()
+	}
+
+	tests := []struct {
+		name    string // description of this test case
+		wantErr bool
+		setup   func()
+		verify  func(t *testing.T)
+	}{
+		{
+			name: "T1-Successful",
+			setup: func() {
+				loadManifest()
+
+				temp := map[string]Value{
+					"key1": {
+						Value: "val2",
+					},
+					"ddd": {
+						Value: "zizk",
+					},
+					"kiki": {
+						Tombstone: true,
+					},
+					"zara": {
+						Value: "zzz",
+					},
+					"ebd": {
+						Value: "nono",
+					},
+				}
+				memStore = temp
+				flushMemTable()
+
+				temp = map[string]Value{
+					"key1": {
+						Value: "val3",
+					},
+					"ebd": {
+						Value: "ekd",
+					},
+					"abc": {
+						Tombstone: true,
+					},
+					"dd": {
+						Value: "dd",
+					},
+				}
+				memStore = temp
+				flushMemTable()
+
+				temp = map[string]Value{
+					"key1": {
+						Value: "val1",
+					},
+					"abc": {
+						Value: "lol",
+					},
+					"dd": {
+						Value: "ken",
+					},
+					"ddd": {
+						Value: "kenithra",
+					},
+					"zara": {
+						Tombstone: true,
+					},
+				}
+				memStore = temp
+				flushMemTable()
+
+			},
+			verify: func(t *testing.T) {
+				if len(manifest) != 1 {
+					t.Fatalf("length of manifest not equal to 1, manifest: %+v\n", manifest)
+				}
+
+				if manifest[0] != "sst-3.json" {
+					t.Fatalf("sst name not equal to sst-3.json, actual name: %s", manifest[0])
+				}
+
+				type entry struct {
+					Key   string `json:"key"`
+					Value string `json:"value"`
+				}
+
+				expected := []entry{
+					{Key: "abc", Value: "lol"},
+					{Key: "dd", Value: "ken"},
+					{Key: "ddd", Value: "kenithra"},
+					{Key: "ebd", Value: "ekd"},
+					{Key: "key1", Value: "val1"},
+				}
+
+				got := []entry{}
+
+				gotData, err := os.ReadFile("sst-3.json")
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				json.Unmarshal(gotData, &got)
+
+				if len(expected) != len(got) {
+					t.Fatalf("data length does not match, got length: %d, expected length: %d", len(got), len(expected))
+				}
+
+				for key, value := range expected {
+					if got[key] != value {
+						t.Errorf("unexpected value for index: %d, got: %s, expected: %s\n", key, got[key], value)
+					}
+				}
+
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanup()
+			defer cleanup()
+
+			if tt.setup != nil {
+				tt.setup()
+			}
+
+			gotErr := triggerCompaction()
+			if gotErr != nil {
+				if !tt.wantErr {
+					t.Errorf("triggerCompaction() failed: %v", gotErr)
+				}
+				return
+			}
+			if tt.wantErr {
+				t.Fatal("triggerCompaction() succeeded unexpectedly")
+			}
+
+			if tt.verify != nil {
+				tt.verify(t)
+			}
+
+		})
+	}
 }
