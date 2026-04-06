@@ -1,7 +1,7 @@
 package memorystore
 
 import (
-	"encoding/json"
+	"fmt"
 	"kv_store/internal/utility"
 	"os"
 	"testing"
@@ -46,7 +46,9 @@ func TestNewFileIterator(t *testing.T) {
 	}
 
 	// compare non-tombstone entries
-	for key, value := range memTableGenerator(4) {
+	keys := []string{"key1", "key2", "key3", "key4"}
+	for _, key := range keys {
+		value := Value{Value: "val" + key[3:]}
 		entry := fileIterator.nextItem()
 		if entry == nil {
 			t.Fatalf("o/p of nextItem is empty, key: %s", key)
@@ -82,122 +84,248 @@ func TestNewFileIterator(t *testing.T) {
 
 }
 
-func Test_triggerCompaction(t *testing.T) {
+func TestFileIterator_EdgeCases(t *testing.T) {
 	cleanup := func() {
 		cleanManifest()
 		cleanSSTFiles()
 	}
+	defer cleanup()
+
+	t.Run("EmptyFile", func(t *testing.T) {
+		cleanup()
+		filename := "empty.json"
+		os.WriteFile(filename, []byte(""), 0644)
+		defer os.Remove(filename)
+
+		iter := NewFileIterator(filename)
+		err := iter.open()
+		if err == nil {
+			t.Error("expected error when opening empty file")
+		}
+	})
+
+	t.Run("MalformedJSON", func(t *testing.T) {
+		cleanup()
+		filename := "malformed.json"
+		os.WriteFile(filename, []byte("[{ \"key\": \"missing_quote }"), 0644)
+		defer os.Remove(filename)
+
+		iter := NewFileIterator(filename)
+		err := iter.open()
+		if err != nil {
+			t.Fatalf("did not expect error during open, got: %v", err)
+		}
+
+		entry := iter.nextItem()
+		if entry != nil {
+			t.Error("expected nil entry for malformed JSON item")
+		}
+	})
+
+	t.Run("NotAJSONArray", func(t *testing.T) {
+		cleanup()
+		filename := "notarray.json"
+		os.WriteFile(filename, []byte("{ \"key\": \"val\" }"), 0644)
+		defer os.Remove(filename)
+
+		iter := NewFileIterator(filename)
+		err := iter.open()
+		if err == nil {
+			t.Error("expected error when file is not a JSON array")
+		}
+	})
+}
+
+func flushData(data map[string]Value) {
+	memStore = data
+	flushMemTable()
+}
+
+func Test_triggerCompaction(t *testing.T) {
+	cleanup := func() {
+		cleanManifest()
+		cleanSSTFiles()
+		memStore = make(map[string]Value)
+	}
 
 	tests := []struct {
-		name    string // description of this test case
+		name    string
 		wantErr bool
 		setup   func()
 		verify  func(t *testing.T)
 	}{
 		{
-			name: "T1-Successful",
+			name: "T1-BasicOverlapAndTombstones",
 			setup: func() {
-				loadManifest()
-
-				temp := map[string]Value{
-					"key1": {
-						Value: "val2",
-					},
-					"ddd": {
-						Value: "zizk",
-					},
-					"kiki": {
-						Tombstone: true,
-					},
-					"zara": {
-						Value: "zzz",
-					},
-					"ebd": {
-						Value: "nono",
-					},
-				}
-				memStore = temp
-				flushMemTable()
-
-				temp = map[string]Value{
-					"key1": {
-						Value: "val3",
-					},
-					"ebd": {
-						Value: "ekd",
-					},
-					"abc": {
-						Tombstone: true,
-					},
-					"dd": {
-						Value: "dd",
-					},
-				}
-				memStore = temp
-				flushMemTable()
-
-				temp = map[string]Value{
-					"key1": {
-						Value: "val1",
-					},
-					"abc": {
-						Value: "lol",
-					},
-					"dd": {
-						Value: "ken",
-					},
-					"ddd": {
-						Value: "kenithra",
-					},
-					"zara": {
-						Tombstone: true,
-					},
-				}
-				memStore = temp
-				flushMemTable()
-
+				// SST-0
+				flushData(map[string]Value{
+					"key1": {Value: "val0"},
+					"key2": {Value: "val0"},
+					"key3": {Tombstone: true},
+				})
+				// SST-1
+				flushData(map[string]Value{
+					"key1": {Value: "val1"},
+					"key3": {Value: "val1"},
+					"key4": {Value: "val1"},
+				})
+				// SST-2
+				flushData(map[string]Value{
+					"key2": {Tombstone: true},
+					"key4": {Value: "val2"},
+					"key5": {Value: "val2"},
+				})
 			},
 			verify: func(t *testing.T) {
 				if len(manifest) != 1 {
-					t.Fatalf("length of manifest not equal to 1, manifest: %+v\n", manifest)
+					t.Fatalf("expected 1 SST file in manifest, got %d", len(manifest))
 				}
 
-				if manifest[0] != "sst-3.json" {
-					t.Fatalf("sst name not equal to sst-3.json, actual name: %s", manifest[0])
-				}
-
-				type entry struct {
-					Key   string `json:"key"`
-					Value string `json:"value"`
-				}
-
-				expected := []entry{
-					{Key: "abc", Value: "lol"},
-					{Key: "dd", Value: "ken"},
-					{Key: "ddd", Value: "kenithra"},
-					{Key: "ebd", Value: "ekd"},
-					{Key: "key1", Value: "val1"},
-				}
-
-				got := []entry{}
-
-				gotData, err := os.ReadFile("sst-3.json")
+				entries, err := loadSST(manifest[0])
 				if err != nil {
 					t.Fatal(err)
 				}
 
-				json.Unmarshal(gotData, &got)
-
-				if len(expected) != len(got) {
-					t.Fatalf("data length does not match, got length: %d, expected length: %d", len(got), len(expected))
+				expected := map[string]string{
+					"key1": "val1",
+					"key3": "val1",
+					"key4": "val2",
+					"key5": "val2",
 				}
 
-				for key, value := range expected {
-					if got[key] != value {
-						t.Errorf("unexpected value for index: %d, got: %s, expected: %s\n", key, got[key], value)
+				if len(entries) != len(expected) {
+					t.Fatalf("expected %d entries, got %d", len(expected), len(entries))
+				}
+
+				for _, entry := range entries {
+					val, ok := expected[entry.Key]
+					if !ok {
+						t.Errorf("unexpected key %s in compacted SST", entry.Key)
+						continue
+					}
+					if entry.Tombstone {
+						t.Errorf("key %s should not be a tombstone", entry.Key)
+					}
+					if *entry.Value != val {
+						t.Errorf("key %s: expected value %s, got %s", entry.Key, val, *entry.Value)
 					}
 				}
+			},
+		},
+		{
+			name: "T2-MultipleOutputFiles",
+			setup: func() {
+				// We'll create two SSTs that when compacted will result in more than MemTableSize entries
+				// Note: utility.MemTableSize is 2000
+				data1 := make(map[string]Value)
+				for i := range 1500 {
+					data1[fmt.Sprintf("a%04d", i)] = Value{Value: "val"}
+				}
+				flushData(data1)
 
+				data2 := make(map[string]Value)
+				for i := range 1500 {
+					data2[fmt.Sprintf("b%04d", i)] = Value{Value: "val"}
+				}
+				flushData(data2)
+			},
+			verify: func(t *testing.T) {
+				// 1500 + 1500 = 3000 entries. MemTableSize = 2000.
+				// Should result in 2 SSTs: one with 2000, one with 1000.
+				if len(manifest) != 2 {
+					t.Fatalf("expected 2 SST files in manifest, got %d", len(manifest))
+				}
+
+				entries1, _ := loadSST(manifest[0])
+				entries2, _ := loadSST(manifest[1])
+
+				if len(entries1) != utility.MemTableSize {
+					t.Errorf("expected %d entries in first SST, got %d", utility.MemTableSize, len(entries1))
+				}
+				if len(entries2) != 1000 {
+					t.Errorf("expected 1000 entries in second SST, got %d", len(entries2))
+				}
+			},
+		},
+		{
+			name: "T3-EmptyResultAfterCompaction",
+			setup: func() {
+				flushData(map[string]Value{
+					"key1": {Value: "val1"},
+				})
+				flushData(map[string]Value{
+					"key1": {Tombstone: true},
+				})
+			},
+			verify: func(t *testing.T) {
+				if len(manifest) != 0 {
+					t.Fatalf("expected 0 SST files in manifest, got %d", len(manifest))
+				}
+			},
+		},
+		{
+			name: "T4-MissingFileInManifest",
+			setup: func() {
+				flushData(map[string]Value{"key1": {Value: "val1"}})
+				flushData(map[string]Value{"key2": {Value: "val2"}})
+				// Manually remove one file from disk but keep in manifest
+				os.Remove(manifest[0])
+			},
+			verify: func(t *testing.T) {
+				// It should skip the missing file and continue
+				if len(manifest) != 1 {
+					t.Fatalf("expected 1 SST file in manifest, got %d", len(manifest))
+				}
+				entries, _ := loadSST(manifest[0])
+				if len(entries) != 1 || entries[0].Key != "key2" {
+					t.Errorf("unexpected entries: %+v", entries)
+				}
+			},
+		},
+		{
+			name: "T5-LargeCompaction",
+			setup: func() {
+				// Many small SSTs
+				for i := range 10 {
+					data := make(map[string]Value)
+					data[fmt.Sprintf("key%d", i)] = Value{Value: "val"}
+					flushData(data)
+				}
+			},
+			verify: func(t *testing.T) {
+				if len(manifest) != 1 {
+					t.Fatalf("expected 1 SST file, got %d", len(manifest))
+				}
+				entries, _ := loadSST(manifest[0])
+				if len(entries) != 10 {
+					t.Errorf("expected 10 entries, got %d", len(entries))
+				}
+			},
+		},
+		{
+			name: "T6-NegativeCacheReset",
+			setup: func() {
+				flushData(map[string]Value{"key1": {Value: "val1"}})
+				// Populate negative cache
+				handleGet("missing_key")
+				found := false
+				for _, nc := range negativeCache {
+					if nc.key == "missing_key" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("failed to populate negative cache")
+				}
+			},
+			verify: func(t *testing.T) {
+				// After compaction, negative cache should be reset
+				for _, nc := range negativeCache {
+					if nc.key != "" {
+						t.Errorf("negative cache not reset: %+v", nc)
+					}
+				}
 			},
 		},
 	}
@@ -211,20 +339,14 @@ func Test_triggerCompaction(t *testing.T) {
 			}
 
 			gotErr := triggerCompaction()
-			if gotErr != nil {
-				if !tt.wantErr {
-					t.Errorf("triggerCompaction() failed: %v", gotErr)
-				}
+			if (gotErr != nil) != tt.wantErr {
+				t.Errorf("triggerCompaction() error = %v, wantErr %v", gotErr, tt.wantErr)
 				return
-			}
-			if tt.wantErr {
-				t.Fatal("triggerCompaction() succeeded unexpectedly")
 			}
 
 			if tt.verify != nil {
 				tt.verify(t)
 			}
-
 		})
 	}
 }
