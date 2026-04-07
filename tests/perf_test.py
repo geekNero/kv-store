@@ -17,7 +17,10 @@ print(len(tests))
 
 put_requests = []
 get_requests = []
+delete_requests = []
 put_count = 0
+
+virtualMemstore = {}
 
 for test in tests:
     test = test.split()
@@ -26,6 +29,7 @@ for test in tests:
     base_url = "http://localhost:8000/keystore/" + test[1]
 
     if test[0] == "PUT":
+        virtualMemstore[test[1]] = True
         data = {"value": test[2]}
         retry = 10
         while retry > 0:
@@ -75,10 +79,41 @@ for test in tests:
             {"put_count": put_count, "time_ms": round(elapsed_time * 1000, 2)}
         )
 
+    elif test[0] == "DELETE":
+        expected200 = virtualMemstore[test[1]]
+
+        retry = 10
+        while retry > 0:
+            try:
+                start_time = time.time()
+                response = requests.delete(base_url)
+                elapsed_time = time.time() - start_time
+                break
+            except requests.exceptions.ConnectionError:
+                retry -= 1
+                sleepTime = (10 - retry) * 10
+                print(f"server down, retrying in {sleepTime} seconds")
+                time.sleep(sleepTime)
+
+        if expected200 and response.status_code != 200:
+            print("failed at test case:", test)
+            sys.exit(1)
+        elif not expected200 and response.status_code == 200:
+            print("failed at test case:", test)
+            sys.exit(1)
+
+        delete_requests.append(
+            {"put_count": put_count, "time_ms": round(elapsed_time * 1000, 2)}
+        )
+
 print("All tests passed")
 
 # Save benchmark data to JSON file
-benchmark_data = {"put_requests": put_requests, "get_requests": get_requests}
+benchmark_data = {
+    "put_requests": put_requests,
+    "get_requests": get_requests,
+    "delete_requests": delete_requests,
+}
 
 with open("benchmark_results.json", "w") as f:
     json.dump(benchmark_data, f, indent=2)

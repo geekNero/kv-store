@@ -22,12 +22,12 @@ func MemoryStoreHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		val, found := handleGet(key)
-		if !found {
+		val := handleGet(key)
+		if val == nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_, err := w.Write([]byte(val))
+		_, err := w.Write([]byte(*val))
 		if err != nil {
 			log.Println("failed to write response body, error: ", err.Error())
 			w.WriteHeader(http.StatusInternalServerError)
@@ -54,8 +54,11 @@ func MemoryStoreHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case http.MethodDelete:
-		if handleDelete(key) {
+		ok, err := handleDelete(key)
+		if ok {
 			w.WriteHeader(http.StatusOK)
+		} else if err == nil {
+			w.WriteHeader(http.StatusNotFound)
 		} else {
 			w.WriteHeader(http.StatusInternalServerError)
 		}

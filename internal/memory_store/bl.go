@@ -2,6 +2,7 @@ package memorystore
 
 import (
 	"fmt"
+	"log"
 
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
@@ -64,29 +65,43 @@ func handlePut(r *spec.PutRequest) bool {
 
 // handleGet searchs the provided key in the in-memory map, and if it fails to find it
 // there, it will search for it within the SSTs.
-func handleGet(key string) (string, bool) {
+func handleGet(key string) *string {
 	value, exists := memStore[key]
 
 	if !exists {
 		// check the sst tables, and ensure it doesn't error out.
-		value, exists, err := checkSST(key)
+		value, err := checkSST(key)
 		if err != nil {
 			fmt.Println("failed to checkSST: ", err.Error())
 		}
-		return value, exists
+		return value
 	}
 	if value.Tombstone {
-		return "", false
+		return nil
 	}
 
-	return value.Value, true
+	return &value.Value
 
 }
 
-func handleDelete(key string) bool {
-	// first mark the entry deleted in memtable
+func handleDelete(key string) (bool, error) {
+	// first check if the entry is present in memStore
 	if !deleteMemtableEntry(key) {
-		return false
+
+		value, err := checkSST(key)
+		if err != nil {
+			log.Println("failed to check SST while serving delete request, error: ", err.Error())
+			return false, err
+		}
+
+		if value == nil {
+			return false, nil
+		}
+
+		memStore[key] = Value{
+			Tombstone: true,
+		}
+
 	}
 
 	walWrite(&spec.WALRequest{
@@ -100,5 +115,5 @@ func handleDelete(key string) bool {
 		triggerCompaction()
 	}
 
-	return true
+	return true, nil
 }

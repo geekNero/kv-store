@@ -7,6 +7,7 @@ with open("benchmark_results.json", "r") as f:
 
 put_times = [req["time_ms"] for req in data["put_requests"]]
 get_times = [req["time_ms"] for req in data["get_requests"]]
+delete_times = [req["time_ms"] for req in data.get("delete_requests", [])]
 
 def calculate_percentiles(times):
     if not times:
@@ -53,10 +54,24 @@ if get_stats:
 else:
     print("No GET requests found")
 
+print("\n=== DELETE Requests ===")
+delete_stats = calculate_percentiles(delete_times)
+if delete_stats:
+    print(f"Count:  {delete_stats['count']}")
+    print(f"Min:    {delete_stats['min']}ms")
+    print(f"Max:    {delete_stats['max']}ms")
+    print(f"Mean:   {delete_stats['mean']}ms")
+    print(f"P50:    {delete_stats['p50']}ms")
+    print(f"P95:    {delete_stats['p95']}ms")
+    print(f"P99:    {delete_stats['p99']}ms")
+else:
+    print("No DELETE requests found")
+
 # Save analysis to file
 analysis_data = {
     "put_stats": put_stats,
-    "get_stats": get_stats
+    "get_stats": get_stats,
+    "delete_stats": delete_stats
 }
 
 with open("benchmark_analysis.json", "w") as f:

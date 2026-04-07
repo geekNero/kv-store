@@ -27,7 +27,7 @@ func loadSST(filename string) ([]spec.SSTEntry, error) {
 }
 
 // checkSST searches for the keys in the SST files created by the flush operations on the local storage.
-func checkSST(key string) (string, bool, error) {
+func checkSST(key string) (*string, error) {
 	// Search through the negative cache before
 	cacheOut := fetchNegativeCache(key)
 	searchEndIndex := max(-1, cacheOut.man)
@@ -39,14 +39,14 @@ outer:
 		// TODO: instead of loading the entire file, we can stream records to check through them
 		sstTable, err := loadSST(manifest[index])
 		if err != nil {
-			return "", false, err
+			return nil, err
 		}
 		for _, item := range sstTable {
 			if item.Key == key {
 				if item.Tombstone {
 					break outer
 				}
-				return *item.Value, true, nil
+				return item.Value, nil
 			}
 		}
 		index--
@@ -54,7 +54,7 @@ outer:
 
 	putNegativeCache(key, len(manifest)-1)
 
-	return "", false, nil
+	return nil, nil
 }
 
 // since negative cache is supposed to be small(100) and we can iterate through it rather quickly,
