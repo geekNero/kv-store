@@ -5,8 +5,11 @@ import (
 	"kv_store/internal/utility"
 	"log"
 	"os"
-	"slices"
 )
+
+type SSTLevel int
+
+const MaxLevel = SSTLevel(4)
 
 func flushManifest() error {
 	var f *os.File
@@ -47,49 +50,25 @@ func flushManifest() error {
 
 // Section of functions that contain code to setup the memory store
 func loadManifest() error {
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		log.Println("failed to list files in current directory")
-		return err
-	}
 	bytes, err := os.ReadFile(utility.ManifestName)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Println("failed to read manifest file")
-			return err
-		}
-
-		for _, entry := range entries {
-			if utility.IsSSTFile(entry.Name()) {
-				manifest = append(manifest, entry.Name())
-			}
-		}
-		slices.SortFunc(manifest, func(a string, b string) int {
-			numA := utility.ExtractSSTFileNumber(a)
-			numB := utility.ExtractSSTFileNumber(b)
-
-			return numA - numB
-		})
-
-	} else {
-		err = json.Unmarshal(bytes, &manifest)
-		if err != nil {
-			log.Println("failed to unmarshal manifest file")
-			return err
-		}
-		for _, entry := range entries {
-			if utility.IsSSTFile(entry.Name()) && utility.ExtractSSTFileNumber(entry.Name()) >= len(manifest) {
-				err = os.Remove(entry.Name())
-				if err != nil {
-					log.Printf("failed to clean up dangling sst file - %s, error: %s\n", entry.Name(), err.Error())
-				}
-			}
-		}
+		log.Println("failed to read manifest file, error: ", err.Error())
+		return err
 	}
-	if len(manifest) > 0 {
-		nextSSTID = utility.ExtractSSTFileNumber(manifest[len(manifest)-1]) + 1
+	err = json.Unmarshal(bytes, &manifest)
+	if err != nil {
+		log.Println("failed to unmarshal manifest file")
+		return err
+	}
+
+	cleanupOrphanedSSTs()
+
+	l0 := manifest[SSTLevel(0)]
+
+	if len(l0) > 0 {
+		nextL0SSTID = utility.ExtractSSTFileNumber(l0[len(l0)-1].Name) + 1
 	} else {
-		nextSSTID = 0
+		nextL0SSTID = 0
 	}
 	return nil
 }

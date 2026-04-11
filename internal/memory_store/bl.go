@@ -9,8 +9,8 @@ import (
 )
 
 type negativeCacheKey struct {
-	key string
-	man int
+	key    string
+	sstNum int
 }
 
 type Value struct {
@@ -24,7 +24,7 @@ const (
 
 var (
 	memStore             = make(map[string]Value)
-	manifest             = make([]string, 0)
+	manifest             = make(map[SSTLevel][]*spec.SSTMetaData)
 	negativeCache        = make([]negativeCacheKey, negativeCacheLimit)
 	negativeCachePointer = 0
 	wal                  WAL

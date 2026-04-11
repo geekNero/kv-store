@@ -3,6 +3,7 @@ package utility_test
 import (
 	"testing"
 
+	"kv_store/internal/spec"
 	"kv_store/internal/utility"
 )
 
@@ -84,5 +85,167 @@ func TestHashStruct(t *testing.T) {
 
 	if h1 == h3 {
 		t.Errorf("HashStruct(s1) == HashStruct(s3)")
+	}
+}
+
+func TestFindKeyContainingSST(t *testing.T) {
+	tests := []struct {
+		name string // description of this test case
+		// Named input parameters for target function.
+		key    string
+		sstSet []*spec.SSTMetaData
+		want   *spec.SSTMetaData
+	}{
+		{
+			name: "T1_Key_Present_in_Middle_SST",
+			key:  "json",
+			sstSet: []*spec.SSTMetaData{
+				{
+					FirstKey: "abc",
+					LastKey:  "beezlebub",
+					Name:     "sst-1",
+				},
+				{
+					FirstKey: "joker",
+					LastKey:  "pharoh",
+					Name:     "sst-2",
+				},
+				{
+					FirstKey: "sleeper",
+					LastKey:  "zof",
+					Name:     "sst-3",
+				},
+			},
+			want: &spec.SSTMetaData{
+				Name: "sst-2",
+			},
+		},
+		{
+			name: "T2_Key_Present_in_LastSST",
+			key:  "jsonk",
+			sstSet: []*spec.SSTMetaData{
+				{
+					FirstKey: "abc",
+					LastKey:  "beezlebub",
+					Name:     "sst-1",
+				},
+				{
+					FirstKey: "jesus",
+					LastKey:  "joker",
+					Name:     "sst-2",
+				},
+				{
+					FirstKey: "jpmorgan",
+					LastKey:  "zof",
+					Name:     "sst-3",
+				},
+			},
+			want: &spec.SSTMetaData{
+
+				Name: "sst-3",
+			},
+		},
+		{
+			name: "T3_Key_Present_in_FirstSST",
+			key:  "babe",
+			sstSet: []*spec.SSTMetaData{
+				{
+					FirstKey: "abc",
+					LastKey:  "beezlebub",
+					Name:     "sst-1",
+				},
+				{
+					FirstKey: "jesus",
+					LastKey:  "joker",
+					Name:     "sst-2",
+				},
+				{
+					FirstKey: "jpmorgan",
+					LastKey:  "zof",
+					Name:     "sst-3",
+				},
+			},
+			want: &spec.SSTMetaData{
+				Name: "sst-1",
+			},
+		},
+		{
+			name: "T4_Key_Absent_P1",
+			key:  "zzz",
+			sstSet: []*spec.SSTMetaData{
+				{
+					FirstKey: "abc",
+					LastKey:  "beezlebub",
+					Name:     "sst-1",
+				},
+				{
+					FirstKey: "jesus",
+					LastKey:  "joker",
+					Name:     "sst-2",
+				},
+				{
+					FirstKey: "jpmorgan",
+					LastKey:  "zof",
+					Name:     "sst-3",
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "T4_Key_Absent_P2",
+			key:  "jpac",
+			sstSet: []*spec.SSTMetaData{
+				{
+					FirstKey: "abc",
+					LastKey:  "beezlebub",
+					Name:     "sst-1",
+				},
+				{
+					FirstKey: "jesus",
+					LastKey:  "joker",
+					Name:     "sst-2",
+				},
+				{
+					FirstKey: "jpmorgan",
+					LastKey:  "zof",
+					Name:     "sst-3",
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "T4_Key_Absent_P3",
+			key:  "aao",
+			sstSet: []*spec.SSTMetaData{
+				{
+					FirstKey: "abc",
+					LastKey:  "beezlebub",
+					Name:     "sst-1",
+				},
+				{
+					FirstKey: "jesus",
+					LastKey:  "joker",
+					Name:     "sst-2",
+				},
+				{
+					FirstKey: "jpmorgan",
+					LastKey:  "zof",
+					Name:     "sst-3",
+				},
+			},
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := utility.FindKeyContainingSST(tt.key, tt.sstSet)
+			if tt.want == nil && got != nil {
+				t.Errorf("FindKeyContainingSST(), got %v, but expected nil", got)
+			}
+
+			if tt.want != nil && tt.want.Name != got.Name {
+				t.Errorf("FindKeyContainingSST(), got %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

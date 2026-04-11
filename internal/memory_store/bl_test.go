@@ -37,7 +37,7 @@ func cleanWAL() {
 func cleanManifest() {
 	manifest = []string{}
 	_ = os.Remove(utility.ManifestName)
-	nextSSTID = 0
+	nextL0SSTID = 0
 }
 
 func memTableGenerator(num int) map[string]Value {
@@ -74,7 +74,7 @@ func Test_flushMemTable(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			memStore = memTableGenerator(2)
-			nextSSTID = tt.inputNextSSTID
+			nextL0SSTID = tt.inputNextSSTID
 			got := flushMemTable()
 			if got == tt.want == true {
 				sstFile, err := os.ReadFile(tt.sstFileName)
@@ -142,7 +142,7 @@ func Test_checkSST(t *testing.T) {
 				}
 
 				// testing independency of SST number
-				nextSSTID = 2
+				nextL0SSTID = 2
 				flushMemTable()
 				memStore = map[string]Value{
 					"key3": {Value: "val3"},
@@ -159,7 +159,7 @@ func Test_checkSST(t *testing.T) {
 			want2:   false,
 			wantErr: false,
 			prepareTest: func() {
-				nextSSTID = 0
+				nextL0SSTID = 0
 				memStore = map[string]Value{
 					"key1": {Value: "val1"},
 					"key2": {Value: "val2"},
@@ -187,7 +187,7 @@ func Test_checkSST(t *testing.T) {
 					"json": {Value: "yay"},
 				}
 				flushMemTable()
-				nextSSTID = 3
+				nextL0SSTID = 3
 				memStore = map[string]Value{
 					"key3": {Value: "val3"},
 					"key1": {Value: "Val1"},
@@ -222,7 +222,7 @@ func Test_checkSST(t *testing.T) {
 					"json": {Value: "yay"},
 				}
 				flushMemTable()
-				nextSSTID = 3
+				nextL0SSTID = 3
 				memStore = map[string]Value{
 					"key3": {Value: "val3"},
 					"key1": {Value: "Val1"},
@@ -684,7 +684,7 @@ func Test_loadManifest(t *testing.T) {
 		},
 		{
 			name:    "T2-NoManifest_WithDanglingSSTs",
-			wantErr: false,
+			wantErr: true,
 			setup: func() {
 				memStore = map[string]Value{
 					"key1": {Value: "val1"},
@@ -699,11 +699,6 @@ func Test_loadManifest(t *testing.T) {
 				}
 				flushMemTable()
 				cleanManifest()
-			},
-			// In case of no manifest, the SSTs are considered as source of truth
-			want: []string{
-				"sst-0.json",
-				"sst-1.json",
 			},
 		},
 		{
@@ -728,7 +723,7 @@ func Test_loadManifest(t *testing.T) {
 					"key1": {Value: "Val1"},
 				}
 				flushMemTable()
-				manifest = []string{}
+				manifest = make(map[SSTLevel][]*ManifestEntry)
 			},
 			want: []string{
 				"sst-0.json",

@@ -10,7 +10,7 @@ import (
 	"kv_store/internal/spec"
 )
 
-var nextSSTID int
+var nextL0SSTID int
 
 func deleteMemtableEntry(key string) bool {
 	entry, exists := memStore[key]
@@ -62,8 +62,8 @@ func flushMemTable() bool {
 }
 
 func writeSST(data []*spec.SSTEntry) (string, error) {
-	sstid := nextSSTID
-	nextSSTID++
+	sstid := nextL0SSTID
+	nextL0SSTID++
 
 	sstName := fmt.Sprintf("sst-%d.json", sstid)
 

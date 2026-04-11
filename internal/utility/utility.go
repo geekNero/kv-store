@@ -3,6 +3,7 @@ package utility
 import (
 	"encoding/json"
 	"hash/crc32"
+	"kv_store/internal/spec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -46,4 +47,25 @@ func CheckPtrStringsEqual(a, b *string) bool {
 		return a == b
 	}
 	return *a == *b
+}
+
+func FindKeyContainingSST(key string, sstSet []*spec.SSTMetaData) *spec.SSTMetaData {
+
+	low := 0
+	high := len(sstSet) - 1
+
+	for low <= high {
+		mid := int((low + high) / 2)
+		element := sstSet[mid]
+
+		if element.FirstKey <= key && element.LastKey >= key {
+			return element
+		} else if element.FirstKey > key {
+			high = mid - 1
+		} else if element.LastKey < key {
+			low = mid + 1
+		}
+	}
+
+	return nil
 }

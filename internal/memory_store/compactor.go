@@ -192,6 +192,7 @@ func triggerCompaction() error {
 
 		// flush into an sst file if data has more than MemTableSize entries.
 		// TODO: stream this data to the new SST file instead of writing it all at once.
+		// To stream, I would have to write the square brackets, and commas on my own, without the help of json package.
 		if len(compactedData) >= utility.MemTableSize {
 			sstName, err := writeSST(compactedData)
 			if err != nil {

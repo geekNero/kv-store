@@ -21,3 +21,9 @@ type SSTEntry struct {
 	Value     *string `json:"value,omitempty"`
 	Tombstone bool    `json:"deleted,omitempty"`
 }
+
+type SSTMetaData struct {
+	Name     string `json:"sst_name"`
+	FirstKey string `json:"first_key"`
+	LastKey  string `json:"second_key"`
+}
