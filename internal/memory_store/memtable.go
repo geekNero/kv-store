@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"kv_store/internal/spec"
@@ -25,7 +26,6 @@ func deleteMemtableEntry(key string) bool {
 }
 
 func flushMemTable() bool {
-
 	// Convert the mem-table into a list of PutRequests and DeleteRequests, to be marshalled out.
 	keys := make([]string, 0, len(memStore))
 	for key := range memStore {
@@ -49,46 +49,53 @@ func flushMemTable() bool {
 		flushOut = append(flushOut, &sstEntry)
 	}
 
-	sstName, err := writeSST(flushOut)
+	level := SSTLevel(0)
+
+	sst, err := writeSST(flushOut, level, fmt.Sprintf(sstTemplate, nextL0SSTID))
 	if err != nil {
 		return false
 	}
+	nextL0SSTID++
 
 	memStore = make(map[string]Value)
 	// need to test if reallocating is faster or clearing each entry is faster.
-	manifest = append(manifest, sstName)
+	manifest[level] = append(manifest[level], sst)
 
 	return true
 }
 
-func writeSST(data []*spec.SSTEntry) (string, error) {
-	sstid := nextL0SSTID
-	nextL0SSTID++
+func writeSST(data []*spec.SSTEntry, level SSTLevel, sstName string) (*spec.SSTMetaData, error) {
+	sstPath := filepath.Join(level.FolderString(), sstName)
+	sstInfo := spec.SSTMetaData{
+		Name: sstName,
+	}
+	if len(data) > 0 {
+		sstInfo.FirstKey = data[0].Key
+		sstInfo.LastKey = data[len(data)-1].Key
+	}
 
-	sstName := fmt.Sprintf("sst-%d.json", sstid)
-
-	f, err := os.Create(sstName)
+	f, err := os.Create(sstPath)
 	if err != nil {
 		fmt.Printf("failed to flush mem-table: %v\n", err.Error())
-		return "", err
+		return nil, err
 	}
 	defer f.Close()
 
 	marshalledOut, err := json.MarshalIndent(data, "", " ")
 	if err != nil {
 		fmt.Println("failed to marshal output in flush: ", err.Error())
-		return "", err
+		return nil, err
 	}
 	_, err = f.Write(marshalledOut)
 	if err != nil {
 		fmt.Printf("failed to write to sst file: %s, err: %v\n", sstName, err.Error())
-		return "", err
+		return nil, err
 	}
 	err = f.Sync()
 	if err != nil {
 		log.Printf("failed to sync SSTFile - %s, error: %s", sstName, err.Error())
-		return "", err
+		return nil, err
 	}
 
-	return sstName, nil
+	return &sstInfo, nil
 }

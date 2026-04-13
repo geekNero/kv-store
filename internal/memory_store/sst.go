@@ -3,12 +3,15 @@ package memorystore
 import (
 	"encoding/json"
 	"fmt"
-	"kv_store/internal/spec"
-	"kv_store/internal/utility"
 	"log"
 	"os"
 	"path/filepath"
+
+	"kv_store/internal/spec"
+	"kv_store/internal/utility"
 )
+
+var sstTemplate = "sst-%d.json"
 
 // if the sst file exists, loadSST returns all of the key value pairs present in it.
 func loadSST(filename string) ([]spec.SSTEntry, error) {
@@ -136,11 +139,10 @@ func searchOrderedSSTs(key string, level SSTLevel) *spec.SSTEntry {
 	}
 
 	return nil
-
 }
 
 func cleanupOrphanedSSTs() {
-	for key, _ := range manifest {
+	for key := range manifest {
 		levelName := fmt.Sprintf("l%d", key)
 		entries, err := os.ReadDir(levelName)
 		if err != nil {
@@ -153,5 +155,4 @@ func cleanupOrphanedSSTs() {
 			}
 		}
 	}
-
 }

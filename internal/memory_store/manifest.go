@@ -2,14 +2,20 @@ package memorystore
 
 import (
 	"encoding/json"
-	"kv_store/internal/utility"
+	"fmt"
 	"log"
 	"os"
+
+	"kv_store/internal/utility"
 )
 
 type SSTLevel int
 
 const MaxLevel = SSTLevel(4)
+
+func (level SSTLevel) FolderString() string {
+	return fmt.Sprintf("l%d", int(level))
+}
 
 func flushManifest() error {
 	var f *os.File
