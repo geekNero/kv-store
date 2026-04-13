@@ -8,10 +8,9 @@ import (
 	"path/filepath"
 	"sort"
 
+	"kv_store/internal/config"
 	"kv_store/internal/spec"
 )
-
-var nextL0SSTID int
 
 func deleteMemtableEntry(key string) bool {
 	entry, exists := memStore[key]
@@ -49,13 +48,13 @@ func flushMemTable() bool {
 		flushOut = append(flushOut, &sstEntry)
 	}
 
-	level := SSTLevel(0)
+	level := spec.SSTLevel(0)
 
-	sst, err := writeSST(flushOut, level, fmt.Sprintf(sstTemplate, nextL0SSTID))
+	sst, err := writeSST(flushOut, level, fmt.Sprintf(sstTemplate, config.Conf.NextFileID[int(level)]))
 	if err != nil {
 		return false
 	}
-	nextL0SSTID++
+	config.Conf.NextFileID[int(level)]++
 
 	memStore = make(map[string]Value)
 	// need to test if reallocating is faster or clearing each entry is faster.
@@ -64,7 +63,7 @@ func flushMemTable() bool {
 	return true
 }
 
-func writeSST(data []*spec.SSTEntry, level SSTLevel, sstName string) (*spec.SSTMetaData, error) {
+func writeSST(data []*spec.SSTEntry, level spec.SSTLevel, sstName string) (*spec.SSTMetaData, error) {
 	sstPath := filepath.Join(level.FolderString(), sstName)
 	sstInfo := spec.SSTMetaData{
 		Name: sstName,
@@ -74,21 +73,21 @@ func writeSST(data []*spec.SSTEntry, level SSTLevel, sstName string) (*spec.SSTM
 		sstInfo.LastKey = data[len(data)-1].Key
 	}
 
-	f, err := os.Create(sstPath)
+	f, err := os.Create(sstPath + ".tmp")
 	if err != nil {
-		fmt.Printf("failed to flush mem-table: %v\n", err.Error())
+		fmt.Printf("failed to create temp sst file: %v\n", err.Error())
 		return nil, err
 	}
 	defer f.Close()
 
 	marshalledOut, err := json.MarshalIndent(data, "", " ")
 	if err != nil {
-		fmt.Println("failed to marshal output in flush: ", err.Error())
+		fmt.Println("failed to marshal output to temp sst during flush: ", err.Error())
 		return nil, err
 	}
 	_, err = f.Write(marshalledOut)
 	if err != nil {
-		fmt.Printf("failed to write to sst file: %s, err: %v\n", sstName, err.Error())
+		fmt.Printf("failed to write to sst file during flush: %s, err: %v\n", sstName, err.Error())
 		return nil, err
 	}
 	err = f.Sync()
@@ -96,6 +95,16 @@ func writeSST(data []*spec.SSTEntry, level SSTLevel, sstName string) (*spec.SSTM
 		log.Printf("failed to sync SSTFile - %s, error: %s", sstName, err.Error())
 		return nil, err
 	}
+
+	err = os.Rename(sstPath+".tmp", sstPath)
+	if err != nil {
+		log.Printf("failed to rename temp sst file with actual path", err.Error())
+	}
+
+	// ensure the file rename persists.
+	dir, _ := os.Open(level.FolderString())
+	dir.Sync()
+	dir.Close()
 
 	return &sstInfo, nil
 }

@@ -1,7 +1,10 @@
 package spec
 
+import "fmt"
+
 const (
 	KeyStorePath = "/keystore/"
+	MaxLevel     = SSTLevel(4)
 )
 
 type PutRequest struct {
@@ -26,4 +29,10 @@ type SSTMetaData struct {
 	Name     string `json:"sst_name"`
 	FirstKey string `json:"first_key"`
 	LastKey  string `json:"second_key"`
+}
+
+type SSTLevel int
+
+func (level SSTLevel) FolderString() string {
+	return fmt.Sprintf("l%d", int(level))
 }

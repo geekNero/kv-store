@@ -24,7 +24,7 @@ const (
 
 var (
 	memStore             = make(map[string]Value)
-	manifest             = make(map[SSTLevel][]*spec.SSTMetaData)
+	manifest             = make(map[spec.SSTLevel][]*spec.SSTMetaData)
 	negativeCache        = make([]negativeCacheKey, negativeCacheLimit)
 	negativeCachePointer = 0
 	wal                  WAL

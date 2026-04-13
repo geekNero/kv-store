@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"kv_store/internal/config"
 	memorystore "kv_store/internal/memory_store"
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
@@ -29,6 +30,11 @@ func main() {
 	err := memorystore.SetupMemoryStore()
 	if err != nil {
 		log.Fatal("failed to setup memory store")
+	}
+
+	err = config.LoadConfig()
+	if err != nil {
+		log.Fatal("failed to setup config")
 	}
 
 	mux := http.NewServeMux()
@@ -54,5 +60,6 @@ func main() {
 	server.Shutdown(context.Background())
 	// ensure all operation necessary items are written to disk
 	memorystore.CloseMemoryStore()
+	config.FlushConfig()
 	utility.ProfileMemory(memprofile)
 }

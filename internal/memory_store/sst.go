@@ -87,6 +87,31 @@ outer:
 	return nil, nil
 }
 
+func searchOrderedSSTs(key string, level SSTLevel) *spec.SSTEntry {
+	// need to lock on the SST with the range via binary search
+
+	levelFolder := fmt.Sprintf("l%d", int(level))
+
+	targetSST := utility.FindKeyContainingSST(key, manifest[level])
+	if targetSST == nil {
+		return nil
+	}
+
+	entries, err := loadSST(filepath.Join(levelFolder, targetSST.Name))
+	if err != nil {
+		log.Printf("failed to load sst of level: %d, sst name: %s, error: %s", int(level), targetSST.Name, err.Error())
+		return nil
+	}
+
+	for _, entry := range entries {
+		if entry.Key == key {
+			return &entry
+		}
+	}
+
+	return nil
+}
+
 // since negative cache is supposed to be small(100) and we can iterate through it rather quickly,
 // we use an array instead of a map in this case.
 func fetchNegativeCache(key string) negativeCacheKey {
@@ -114,31 +139,6 @@ func putNegativeCache(key string, sstNum int) {
 
 func resetNegativeCache() {
 	negativeCache = make([]negativeCacheKey, negativeCacheLimit)
-}
-
-func searchOrderedSSTs(key string, level SSTLevel) *spec.SSTEntry {
-	// need to lock on the SST with the range via binary search
-
-	levelFolder := fmt.Sprintf("l%d", int(level))
-
-	targetSST := utility.FindKeyContainingSST(key, manifest[level])
-	if targetSST == nil {
-		return nil
-	}
-
-	entries, err := loadSST(filepath.Join(levelFolder, targetSST.Name))
-	if err != nil {
-		log.Printf("failed to load sst of level: %d, sst name: %s, error: %s", int(level), targetSST.Name, err.Error())
-		return nil
-	}
-
-	for _, entry := range entries {
-		if entry.Key == key {
-			return &entry
-		}
-	}
-
-	return nil
 }
 
 func cleanupOrphanedSSTs() {

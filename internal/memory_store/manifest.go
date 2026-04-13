@@ -2,20 +2,11 @@ package memorystore
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"os"
 
 	"kv_store/internal/utility"
 )
-
-type SSTLevel int
-
-const MaxLevel = SSTLevel(4)
-
-func (level SSTLevel) FolderString() string {
-	return fmt.Sprintf("l%d", int(level))
-}
 
 func flushManifest() error {
 	var f *os.File
@@ -69,12 +60,5 @@ func loadManifest() error {
 
 	cleanupOrphanedSSTs()
 
-	l0 := manifest[SSTLevel(0)]
-
-	if len(l0) > 0 {
-		nextL0SSTID = utility.ExtractSSTFileNumber(l0[len(l0)-1].Name) + 1
-	} else {
-		nextL0SSTID = 0
-	}
 	return nil
 }

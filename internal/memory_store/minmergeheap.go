@@ -45,3 +45,5 @@ func (h MinMergeHeap) Peek() *HeapEntry {
 	}
 	return h[0]
 }
+
+func compact(iterables []*fileIterator)

@@ -110,17 +110,15 @@ func (iterator *fileIterator) close() error {
 }
 
 /*
-In the compaciton process, we extract the latest representaion of each key value pair and
-create new SSTs that only represent those. In doing so, we rewrite the manifest as well.
-We could reset the numbering of SSTs or we could continue it, our operations won't be impacted either
-way as long as the manifest is consistent.
-
-Before compaction, the higher the SST number is, newer are the entries it has.
-After compaction, the higher SSTs simply contain lexiographically decreasing key value pairs.
+L0 compaction is a special case where all SST files present would be compacted for the first time.
+In shift compaction method, L0 files would be compacted with L1 files (around 1000 files). To avoid opening
+a ton of file iterators, we will first compact L0 on it's own, after which we can compact it with L1 using only a
+few file iterators at a time.
 */
-func triggerCompaction() error {
+func triggerL0Compaction() error {
 	// create iterators for all files in manfiest
-	iterables := make([]*fileIterator, 0, len(manifest))
+	level0 := spec.SSTLevel(0)
+	iterables := make([]*fileIterator, 0, len(manifest[level0]))
 
 	// create a min h and push one entry of each sst into the min h.
 	// each sst should always have atleast one entry, and if it does not then something went
