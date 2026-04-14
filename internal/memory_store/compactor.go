@@ -1,14 +1,12 @@
 package memorystore
 
 import (
-	"container/heap"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 
 	"kv_store/internal/spec"
-	"kv_store/internal/utility"
 )
 
 type decodeState string
@@ -23,6 +21,7 @@ type fileIterator struct {
 	decoder  *json.Decoder
 	f        *os.File
 	fileName string
+	level    spec.SSTLevel
 	decodeState
 }
 
@@ -117,124 +116,37 @@ few file iterators at a time.
 */
 func triggerL0Compaction() error {
 	// create iterators for all files in manfiest
-	level0 := spec.SSTLevel(0)
-	iterables := make([]*fileIterator, 0, len(manifest[level0]))
+	l0 := manifest[spec.SSTLevel(0)]
+	iterables := make([]*fileIterator, 0, len(l0))
 
-	// create a min h and push one entry of each sst into the min h.
-	// each sst should always have atleast one entry, and if it does not then something went
-	// wrong with the sst.
-	h := MinMergeHeap{}
-
-	for _, file := range manifest {
-		iterator := NewFileIterator(file)
+	for _, file := range l0 {
+		iterator := NewFileIterator(file.Name)
 		if iterator == nil {
 			continue
 		}
-		err := iterator.open()
-		if err != nil {
-			log.Println("error when attempting to open iterator, error: ", err.Error())
-			continue
-		}
 		iterables = append(iterables, iterator)
-		index := len(iterables) - 1
-
-		entry := iterables[index].nextItem()
-		if entry == nil {
-			log.Println("sst has 0 entries, sstname: ", file)
-			iterables[index].close()
-			continue
-		}
-
-		sstID := utility.ExtractSSTFileNumber(file)
-		h.Push(&HeapEntry{
-			SSTEntry: entry,
-			sstID:    sstID,
-			index:    index,
-		})
-	}
-	heap.Init(&h)
-
-	// prepare datastructures to hold sst and manifest data
-	compactedData := make([]*spec.SSTEntry, 0)
-	newManifest := make([]string, 0)
-
-	// checks if the file iterator has another entry to provide, if yes
-	// then adds it to the heap, or closes it if not already closed.
-	addNextItemtoHeap := func(index int) {
-		if iterables[index].decodeState == decoding {
-			entry := iterables[index].nextItem()
-			if entry == nil {
-				err := iterables[index].close()
-				if err != nil {
-					log.Println("failed to close exhausted sst file: ", iterables[index].fileName)
-				}
-				return
-			}
-
-			heap.Push(&h, &HeapEntry{
-				SSTEntry: entry,
-				sstID:    utility.ExtractSSTFileNumber(iterables[index].fileName),
-				index:    index,
-			})
-		}
 	}
 
-	for h.Len() > 0 {
-		top := heap.Pop(&h).(*HeapEntry)
-		if !top.Tombstone {
-			compactedData = append(compactedData, top.SSTEntry)
-		}
-
-		// move the iterator forward
-		addNextItemtoHeap(top.index)
-
-		// flush into an sst file if data has more than MemTableSize entries.
-		// TODO: stream this data to the new SST file instead of writing it all at once.
-		// To stream, I would have to write the square brackets, and commas on my own, without the help of json package.
-		if len(compactedData) >= utility.MemTableSize {
-			sstName, err := writeSST(compactedData)
-			if err != nil {
-				log.Println("failed to write compacted data to sst file, error: ", err.Error())
-				return err
-			}
-			newManifest = append(newManifest, sstName)
-			compactedData = make([]*spec.SSTEntry, 0)
-		}
-
-		// flush out the older versions of sst keys
-		for h.Len() > 0 && h.Peek().Key == top.Key {
-			disposableEntry := heap.Pop(&h).(*HeapEntry)
-			addNextItemtoHeap(disposableEntry.index)
-		}
-	}
-
-	if len(compactedData) > 0 {
-		sstName, err := writeSST(compactedData)
-		if err != nil {
-			log.Println("failed to write compacted data to sst file, error: ", err.Error())
-			return err
-		}
-		newManifest = append(newManifest, sstName)
-	}
-
-	oldManifest := manifest
-	manifest = newManifest
-	err := flushManifest()
+	err := compact(iterables, spec.SSTLevel(0))
 	if err != nil {
-		log.Println("failed to flush manifest after compaction, error: ", err.Error())
+		log.Println("error occured while compacting l0 into sorted ssts, error: ", err.Error())
 		return err
-	}
-
-	// delete older ssts after the new ssts have been written to.
-	for _, file := range oldManifest {
-		err := os.Remove(file)
-		if err != nil {
-			log.Printf("failed to purge older sst: %s after compaction, error: %s", file, err.Error())
-		}
 	}
 
 	resetNegativeCache()
 	mutationCounter = 0
 
 	return nil
+}
+
+func multiLevelCompaction(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
+
+	if lowerLevel > spec.MaxLevel || upperLevel > spec.MaxLevel {
+		return fmt.Errorf("level should be less than max level: %d, lowerLevel: %d, upperLevel: %d", int(spec.MaxLevel), int(lowerLevel), int(upperLevel))
+	}
+
+	for _, source := range manifest[lowerLevel] {
+		iterables := make([]*fileIterator, 0, 2)
+		err := NewFileIterator(source.Name)
+	}
 }

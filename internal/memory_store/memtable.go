@@ -50,11 +50,10 @@ func flushMemTable() bool {
 
 	level := spec.SSTLevel(0)
 
-	sst, err := writeSST(flushOut, level, fmt.Sprintf(sstTemplate, config.Conf.NextFileID[int(level)]))
+	sst, err := writeSST(flushOut, level)
 	if err != nil {
 		return false
 	}
-	config.Conf.NextFileID[int(level)]++
 
 	memStore = make(map[string]Value)
 	// need to test if reallocating is faster or clearing each entry is faster.
@@ -63,7 +62,10 @@ func flushMemTable() bool {
 	return true
 }
 
-func writeSST(data []*spec.SSTEntry, level spec.SSTLevel, sstName string) (*spec.SSTMetaData, error) {
+func writeSST(data []*spec.SSTEntry, level spec.SSTLevel) (*spec.SSTMetaData, error) {
+
+	sstName := getNextSSTName(level)
+
 	sstPath := filepath.Join(level.FolderString(), sstName)
 	sstInfo := spec.SSTMetaData{
 		Name: sstName,
@@ -107,4 +109,16 @@ func writeSST(data []*spec.SSTEntry, level spec.SSTLevel, sstName string) (*spec
 	dir.Close()
 
 	return &sstInfo, nil
+}
+
+func getNextSSTName(level spec.SSTLevel) string {
+	if level > spec.MaxLevel {
+		return ""
+	}
+
+	sstName := fmt.Sprintf(sstTemplate, config.Conf.NextFileID[level])
+	config.Conf.NextFileID[level]++
+	config.FlushConfig()
+
+	return sstName
 }
