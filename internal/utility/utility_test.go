@@ -88,6 +88,53 @@ func TestHashStruct(t *testing.T) {
 	}
 }
 
+func TestIsSSTFile(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"Valid", "sst-1.json", true},
+		{"ValidMultiDigit", "sst-123.json", true},
+		{"InvalidPrefix", "st-1.json", false},
+		{"InvalidExtension", "sst-1.txt", false},
+		{"NoNumber", "sst-.json", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := utility.IsSSTFile(tt.path); got != tt.want {
+				t.Errorf("IsSSTFile() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckPtrStringsEqual(t *testing.T) {
+	s1 := "hello"
+	s2 := "hello"
+	s3 := "world"
+
+	tests := []struct {
+		name string
+		a    *string
+		b    *string
+		want bool
+	}{
+		{"BothNil", nil, nil, true},
+		{"OneNil", &s1, nil, false},
+		{"OtherNil", nil, &s1, false},
+		{"Equal", &s1, &s2, true},
+		{"NotEqual", &s1, &s3, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := utility.CheckPtrStringsEqual(tt.a, tt.b); got != tt.want {
+				t.Errorf("CheckPtrStringsEqual() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFindKeyContainingSST(t *testing.T) {
 	tests := []struct {
 		name string // description of this test case
@@ -251,26 +298,68 @@ func TestFindKeyContainingSST(t *testing.T) {
 }
 
 func TestFindSSTRange(t *testing.T) {
+	sstSet := []*spec.SSTMetaData{
+		{FirstKey: "apple", LastKey: "banana", Name: "sst-1"},
+		{FirstKey: "cherry", LastKey: "date", Name: "sst-2"},
+		{FirstKey: "elephant", LastKey: "fig", Name: "sst-3"},
+		{FirstKey: "grape", LastKey: "honeydew", Name: "sst-4"},
+	}
+
 	tests := []struct {
-		name string // description of this test case
-		// Named input parameters for target function.
-		firstKey string
-		lastKey  string
-		sstSet   []*spec.SSTMetaData
-		want     int
-		want2    int
+		name      string
+		firstKey  string
+		lastKey   string
+		wantStart int
+		wantEnd   int
 	}{
-		// TODO: Add test cases.
+		{
+			name:      "T1-NoOverlap-Before",
+			firstKey:  "aardvark",
+			lastKey:   "acorn",
+			wantStart: 0,
+			wantEnd:   0,
+		},
+		{
+			name:      "T2-NoOverlap-Between",
+			firstKey:  "blueberry",
+			lastKey:   "cantaloupe",
+			wantStart: 1,
+			wantEnd:   1,
+		},
+		{
+			name:      "T3-SingleOverlap",
+			firstKey:  "avocado",
+			lastKey:   "bayberry",
+			wantStart: 0,
+			wantEnd:   1,
+		},
+		{
+			name:      "T4-MultipleOverlap",
+			firstKey:  "avocado",
+			lastKey:   "elderberry",
+			wantStart: 0,
+			wantEnd:   2,
+		},
+		{
+			name:      "T5-ExactMatch",
+			firstKey:  "cherry",
+			lastKey:   "date",
+			wantStart: 1,
+			wantEnd:   2,
+		},
+		{
+			name:      "T6-NoOverlap-After",
+			firstKey:  "iris",
+			lastKey:   "jackfruit",
+			wantStart: 4,
+			wantEnd:   4,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, got2 := utility.FindSSTRange(tt.firstKey, tt.lastKey, tt.sstSet)
-			// TODO: update the condition below to compare got with tt.want.
-			if true {
-				t.Errorf("FindSSTRange() = %v, want %v", got, tt.want)
-			}
-			if true {
-				t.Errorf("FindSSTRange() = %v, want %v", got2, tt.want2)
+			gotStart, gotEnd := utility.FindSSTRange(tt.firstKey, tt.lastKey, sstSet)
+			if gotStart != tt.wantStart || gotEnd != tt.wantEnd {
+				t.Errorf("FindSSTRange() = (%v, %v), want (%v, %v)", gotStart, gotEnd, tt.wantStart, tt.wantEnd)
 			}
 		})
 	}
