@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 
+	"kv_store/internal/config"
 	"kv_store/internal/spec"
 )
 
@@ -22,11 +23,12 @@ type fileIterator struct {
 	f        *os.File
 	fileName string
 	level    spec.SSTLevel
+	index    int
 	decodeState
 }
 
-func NewFileIterator(fileName string) *fileIterator {
-
+func NewFileIterator(index int, level spec.SSTLevel) *fileIterator {
+	fileName := manifest[level][index].Name
 	f, err := os.Open(fileName)
 	if err != nil {
 		log.Printf("failed to open file %s during compaction, error: %s", fileName, err.Error())
@@ -37,6 +39,8 @@ func NewFileIterator(fileName string) *fileIterator {
 		decoder:     json.NewDecoder(f),
 		decodeState: start,
 		fileName:    fileName,
+		level:       level,
+		index:       index,
 	}
 	return iterator
 }
@@ -119,8 +123,8 @@ func triggerL0Compaction() error {
 	l0 := manifest[spec.SSTLevel(0)]
 	iterables := make([]*fileIterator, 0, len(l0))
 
-	for _, file := range l0 {
-		iterator := NewFileIterator(file.Name)
+	for index := range l0 {
+		iterator := NewFileIterator(index, spec.SSTLevel(0))
 		if iterator == nil {
 			continue
 		}
@@ -140,13 +144,68 @@ func triggerL0Compaction() error {
 }
 
 func multiLevelCompaction(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
-
 	if lowerLevel > spec.MaxLevel || upperLevel > spec.MaxLevel {
 		return fmt.Errorf("level should be less than max level: %d, lowerLevel: %d, upperLevel: %d", int(spec.MaxLevel), int(lowerLevel), int(upperLevel))
 	}
 
-	for _, source := range manifest[lowerLevel] {
-		iterables := make([]*fileIterator, 0, 2)
-		err := NewFileIterator(source.Name)
+	iterables := []*fileIterator{}
+
+	for i := range manifest[lowerLevel] {
+		iterable := NewFileIterator(i, lowerLevel)
+		if iterable == nil {
+			continue
+		}
+
+		iterables = append(iterables, iterable)
+
+		if len(iterables) == int(config.Conf.CompactionBatchSize) {
+			iterables = addOverlappingSSTRange(iterables, upperLevel)
+		}
 	}
+	return nil
+}
+
+func addOverlappingSSTRange(iterables []*fileIterator, level spec.SSTLevel) []*fileIterator {
+	lastIndex := len(iterables) - 1
+	firstKey := manifest[iterables[0].level][iterables[0].index].FirstKey
+	lastKey := manifest[iterables[lastIndex].level][iterables[lastIndex].index].LastKey
+
+	levelManifest := manifest[level]
+	low := 0
+	high := len(levelManifest) - 1
+	var mid int
+
+	// find the nearest sst to the range
+	for low <= high {
+		mid = (low + high) / 2
+		if levelManifest[mid].FirstKey == firstKey {
+			break
+		} else if levelManifest[mid].FirstKey < firstKey {
+			low = mid + 1
+		} else {
+			high = mid - 1
+		}
+	}
+
+	// spread the range left
+	for i := mid - 1; i > 0; i-- {
+		// wrong condition
+		if levelManifest[i].FirstKey <= firstKey && levelManifest[i].LastKey >= firstKey {
+			iterator := NewFileIterator(i, level)
+			if iterator == nil {
+				continue
+			}
+			iterables = append(iterables, iterator)
+		} else {
+			break
+		}
+	}
+
+	// spread the range right
+	for i := mid; i < len(levelManifest); i++ {
+		if levelManifest[i].FirstKey <= lastKey && levelManifest[i].LastKey >= lastKey {
+		}
+	}
+
+	return nil
 }

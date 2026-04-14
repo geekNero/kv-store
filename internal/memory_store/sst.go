@@ -40,7 +40,7 @@ func checkSST(key string) (*string, error) {
 
 	// begin looking for the key in l0.
 	found := false
-	l0 := manifest[SSTLevel(0)]
+	l0 := manifest[spec.SSTLevel(0)]
 	index := len(l0) - 1
 outer:
 	for index > searchEndIndex {
@@ -67,9 +67,9 @@ outer:
 
 	if !found {
 		// check higher levels
-		level := SSTLevel(1)
+		level := spec.SSTLevel(1)
 
-		for level <= MaxLevel {
+		for level <= spec.MaxLevel {
 			value := searchOrderedSSTs(key, level)
 			if value != nil {
 				if value.Tombstone {
@@ -87,7 +87,7 @@ outer:
 	return nil, nil
 }
 
-func searchOrderedSSTs(key string, level SSTLevel) *spec.SSTEntry {
+func searchOrderedSSTs(key string, level spec.SSTLevel) *spec.SSTEntry {
 	// need to lock on the SST with the range via binary search
 
 	levelFolder := fmt.Sprintf("l%d", int(level))

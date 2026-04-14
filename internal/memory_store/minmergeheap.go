@@ -3,10 +3,11 @@ package memorystore
 import (
 	"container/heap"
 	"fmt"
-	"kv_store/internal/spec"
-	"kv_store/internal/utility"
 	"log"
 	"os"
+
+	"kv_store/internal/spec"
+	"kv_store/internal/utility"
 )
 
 type HeapEntry struct {
@@ -59,7 +60,6 @@ func (h MinMergeHeap) Peek() *HeapEntry {
 }
 
 func compact(iterables []*fileIterator, targetLevel spec.SSTLevel) error {
-
 	// create a min h and push one entry of each sst into the min h.
 	// each sst should always have atleast one entry, and if it does not then something went
 	// wrong with the sst.
@@ -79,7 +79,6 @@ func compact(iterables []*fileIterator, targetLevel spec.SSTLevel) error {
 			iterables[index].close()
 			continue
 		}
-
 		sstID := utility.ExtractSSTFileNumber(iterable.fileName)
 		h.Push(&HeapEntry{
 			SSTEntry: entry,
