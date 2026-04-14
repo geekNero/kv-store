@@ -137,6 +137,12 @@ func triggerL0Compaction() error {
 		return err
 	}
 
+	err = multiLevelCompaction(spec.SSTLevel(0), spec.SSTLevel(1))
+	if err != nil {
+		log.Println("failed to compact sst-0 to sst-1, error: ", err.Error())
+		return err
+	}
+
 	resetNegativeCache()
 	mutationCounter = 0
 
@@ -161,7 +167,22 @@ func multiLevelCompaction(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) er
 		if len(iterables) == int(config.Conf.CompactionBatchSize) {
 			iterables = addOverlappingSSTRange(iterables, upperLevel)
 		}
+
+		err := compact(iterables, upperLevel)
+		if err != nil {
+			fmt.Printf("failed to compact level %d into level %d, error: %s", int(lowerLevel), int(upperLevel), err.Error())
+			return err
+		}
 	}
+
+	// empty the lower level
+	lowerManifest := manifest[lowerLevel]
+	manifest[lowerLevel] = make([]*spec.SSTMetaData, 0)
+
+	for _, file := range lowerManifest {
+		os.Remove(file.Name)
+	}
+
 	return nil
 }
 
@@ -187,25 +208,24 @@ func addOverlappingSSTRange(iterables []*fileIterator, level spec.SSTLevel) []*f
 		}
 	}
 
-	// spread the range left
-	for i := mid - 1; i > 0; i-- {
-		// wrong condition
-		if levelManifest[i].FirstKey <= firstKey && levelManifest[i].LastKey >= firstKey {
-			iterator := NewFileIterator(i, level)
-			if iterator == nil {
-				continue
-			}
+	// check immediate left
+	if mid-1 > 0 && levelManifest[mid].LastKey >= firstKey {
+		iterator := NewFileIterator(mid, level)
+		if iterator != nil {
 			iterables = append(iterables, iterator)
-		} else {
-			break
 		}
 	}
 
 	// spread the range right
 	for i := mid; i < len(levelManifest); i++ {
-		if levelManifest[i].FirstKey <= lastKey && levelManifest[i].LastKey >= lastKey {
+		if levelManifest[i].FirstKey > lastKey {
+			break
+		}
+		iterator := NewFileIterator(i, level)
+		if iterator != nil {
+			iterables = append(iterables, iterator)
 		}
 	}
 
-	return nil
+	return iterables
 }
