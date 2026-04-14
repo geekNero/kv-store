@@ -148,8 +148,9 @@ func cleanupOrphanedSSTs() {
 		}
 
 		for _, entry := range entries {
+			fmt.Printf("checking file: %s for orphaned sst\n", entry.Name())
 			if filepath.Ext(entry.Name()) == ".tmp" {
-				os.Remove(entry.Name())
+				os.Remove(key.GetSSTPath(entry.Name()))
 			}
 		}
 	}

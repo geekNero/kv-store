@@ -8,21 +8,34 @@ import (
 	"sort"
 	"testing"
 
+	"kv_store/internal/config"
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
 
 	"github.com/google/go-cmp/cmp"
 )
 
-func cleanSSTFiles() {
-	// Cleanup any sst-files
-	files, err := filepath.Glob("sst*.json")
-	if err != nil {
-		fmt.Println("Failed to cleanup sst-files post test case execution")
+func TestMain(m *testing.M) {
+	config.LoadConfig()
+	// Ensure directories exist
+	for l := spec.SSTLevel(0); l <= spec.MaxLevel; l++ {
+		os.MkdirAll(l.FolderString(), 0755)
 	}
+	os.Exit(m.Run())
+}
 
-	for _, f := range files {
-		_ = os.Remove(f)
+func cleanSSTFiles() {
+	// Cleanup any sst-files in all levels
+	for l := spec.SSTLevel(0); l <= spec.MaxLevel; l++ {
+		files, err := filepath.Glob(l.GetSSTPath("sst*.json"))
+		if err != nil {
+			fmt.Printf("Failed to cleanup sst-files in %s post test case execution\n", l.FolderString())
+			continue
+		}
+
+		for _, f := range files {
+			_ = os.Remove(f)
+		}
 	}
 }
 
@@ -35,9 +48,13 @@ func cleanWAL() {
 }
 
 func cleanManifest() {
-	manifest = []string{}
+	manifest = make(map[spec.SSTLevel][]*spec.SSTMetaData)
 	_ = os.Remove(utility.ManifestName)
-	nextL0SSTID = 0
+	if config.Conf.NextFileID != nil {
+		for i := range config.Conf.NextFileID {
+			config.Conf.NextFileID[i] = 0
+		}
+	}
 }
 
 func memTableGenerator(num int) map[string]Value {
@@ -51,7 +68,7 @@ func memTableGenerator(num int) map[string]Value {
 
 func Test_flushMemTable(t *testing.T) {
 	type args struct {
-		inputNextSSTID int
+		inputNextSSTID uint64
 		sstFileName    string
 	}
 
@@ -62,40 +79,41 @@ func Test_flushMemTable(t *testing.T) {
 	}{
 		{
 			name: "T1-No_Manifest_Files",
-			args: args{inputNextSSTID: 0, sstFileName: "sst-0.json"},
+			args: args{inputNextSSTID: 0, sstFileName: spec.SSTLevel(0).GetSSTPath("sst-0.json")},
 			want: true,
 		},
 		{
 			name: "T2-Few_Manifest_Files",
-			args: args{inputNextSSTID: 2, sstFileName: "sst-2.json"},
+			args: args{inputNextSSTID: 2, sstFileName: spec.SSTLevel(0).GetSSTPath("sst-2.json")},
 			want: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			memStore = memTableGenerator(2)
-			nextL0SSTID = tt.inputNextSSTID
+			config.Conf.NextFileID[0] = tt.inputNextSSTID
 			got := flushMemTable()
-			if got == tt.want == true {
+			if got == tt.want {
 				sstFile, err := os.ReadFile(tt.sstFileName)
 				if err != nil {
-					t.Errorf("failed: unable to open sstFile - %s", tt.sstFileName)
+					t.Errorf("failed: unable to open sstFile - %s, err: %v", tt.sstFileName, err)
 				}
-				sstData := []spec.PutRequest{}
+				sstData := []spec.SSTEntry{}
 				err = json.Unmarshal(sstFile, &sstData)
 				if err != nil {
-					t.Errorf("failed: unable to unmarshal sstFile - %s", tt.sstFileName)
+					t.Errorf("failed: unable to unmarshal sstFile - %s, err: %v", tt.sstFileName, err)
 				}
 
-				// Convert map to slice of PutRequest for comparison
+				// Convert map to slice of SSTEntry for comparison
 				keys := make([]string, 0, 2)
 				for k := range memTableGenerator(2) {
 					keys = append(keys, k)
 				}
 				sort.Strings(keys)
-				memTableSlice := make([]spec.PutRequest, 0, len(keys))
+				memTableSlice := make([]spec.SSTEntry, 0, len(keys))
 				for _, k := range keys {
-					memTableSlice = append(memTableSlice, spec.PutRequest{Key: k, Value: memTableGenerator(2)[k].Value})
+					val := memTableGenerator(2)[k].Value
+					memTableSlice = append(memTableSlice, spec.SSTEntry{Key: k, Value: &val})
 				}
 				if diff := cmp.Diff(sstData, memTableSlice); diff != "" {
 					t.Errorf("failed: data don't match\n %s", diff)
@@ -123,17 +141,17 @@ func Test_checkSST(t *testing.T) {
 		name          string
 		key           string
 		want          string
-		want2         bool
+		wantPresent   bool
 		wantErr       bool
 		prepareTest   func()
 		postTestCheck func()
 	}{
 		{
-			name:    "T1_Key_Present",
-			key:     "json",
-			want:    "yay",
-			want2:   true,
-			wantErr: false,
+			name:        "T1_Key_Present",
+			key:         "json",
+			want:        "yay",
+			wantPresent: true,
+			wantErr:     false,
 			prepareTest: func() {
 				memStore = map[string]Value{
 					"key1": {Value: "val1"},
@@ -142,7 +160,7 @@ func Test_checkSST(t *testing.T) {
 				}
 
 				// testing independency of SST number
-				nextL0SSTID = 2
+				config.Conf.NextFileID[0] = 2
 				flushMemTable()
 				memStore = map[string]Value{
 					"key3": {Value: "val3"},
@@ -153,13 +171,13 @@ func Test_checkSST(t *testing.T) {
 			postTestCheck: cleanupFunc,
 		},
 		{
-			name:    "T2_Key_Not_Present",
-			key:     "txt",
-			want:    "",
-			want2:   false,
-			wantErr: false,
+			name:        "T2_Key_Not_Present",
+			key:         "txt",
+			want:        "",
+			wantPresent: false,
+			wantErr:     false,
 			prepareTest: func() {
-				nextL0SSTID = 0
+				config.Conf.NextFileID[0] = 0
 				memStore = map[string]Value{
 					"key1": {Value: "val1"},
 					"key2": {Value: "val2"},
@@ -175,11 +193,11 @@ func Test_checkSST(t *testing.T) {
 			postTestCheck: cleanupFunc,
 		},
 		{
-			name:    "T3_Key_Not_Present_Negative_Cache",
-			key:     "txt",
-			want:    "",
-			want2:   false,
-			wantErr: false,
+			name:        "T3_Key_Not_Present_Negative_Cache",
+			key:         "txt",
+			want:        "",
+			wantPresent: false,
+			wantErr:     false,
 			prepareTest: func() {
 				memStore = map[string]Value{
 					"key1": {Value: "val1"},
@@ -187,7 +205,7 @@ func Test_checkSST(t *testing.T) {
 					"json": {Value: "yay"},
 				}
 				flushMemTable()
-				nextL0SSTID = 3
+				config.Conf.NextFileID[0] = 3
 				memStore = map[string]Value{
 					"key3": {Value: "val3"},
 					"key1": {Value: "Val1"},
@@ -203,18 +221,18 @@ func Test_checkSST(t *testing.T) {
 			},
 			postTestCheck: func() {
 				val := fetchNegativeCache("txt")
-				if val.man != 2 {
-					t.Errorf("T3: manifest value not updated in negative cache: expected: %d, got: %d", 2, val.man)
+				if val.sstNum != 2 {
+					t.Errorf("T3: sstNum value not updated in negative cache: expected: %d, got: %d", 2, val.sstNum)
 				}
 				cleanupFunc()
 			},
 		},
 		{
-			name:    "T4_Key_Deleted",
-			key:     "txt",
-			want:    "",
-			want2:   false,
-			wantErr: false,
+			name:        "T4_Key_Deleted",
+			key:         "txt",
+			want:        "",
+			wantPresent: false,
+			wantErr:     false,
 			prepareTest: func() {
 				memStore = map[string]Value{
 					"key1": {Value: "val1"},
@@ -222,7 +240,7 @@ func Test_checkSST(t *testing.T) {
 					"json": {Value: "yay"},
 				}
 				flushMemTable()
-				nextL0SSTID = 3
+				config.Conf.NextFileID[0] = 3
 				memStore = map[string]Value{
 					"key3": {Value: "val3"},
 					"key1": {Value: "Val1"},
@@ -237,8 +255,8 @@ func Test_checkSST(t *testing.T) {
 			},
 			postTestCheck: func() {
 				val := fetchNegativeCache("txt")
-				if val.man != 2 {
-					t.Errorf("T3: manifest value not updated in negative cache: expected: %d, got: %d", 2, val.man)
+				if val.sstNum != 2 {
+					t.Errorf("T4: sstNum value not updated in negative cache: expected: %d, got: %d", 2, val.sstNum)
 				}
 				cleanupFunc()
 			},
@@ -251,22 +269,17 @@ func Test_checkSST(t *testing.T) {
 			if tt.prepareTest != nil {
 				tt.prepareTest()
 			}
-			got, got2, gotErr := checkSST(tt.key)
-			if gotErr != nil {
-				if !tt.wantErr {
-					t.Errorf("checkSST() failed: %v", gotErr)
-				}
+			got, gotErr := checkSST(tt.key)
+			if (gotErr != nil) != tt.wantErr {
+				t.Errorf("checkSST() error = %v, wantErr %v", gotErr, tt.wantErr)
 				return
 			}
-			if tt.wantErr {
-				t.Fatal("checkSST() succeeded unexpectedly")
-			}
 
-			if got != tt.want {
-				t.Errorf("checkSST() = %v, want %v", got, tt.want)
+			if got != nil && *got != tt.want {
+				t.Errorf("checkSST() = %v, want %v", *got, tt.want)
 			}
-			if got2 != tt.want2 {
-				t.Errorf("checkSST() = %v, want %v", got2, tt.want2)
+			if (got != nil) != tt.wantPresent {
+				t.Errorf("checkSST() presence = %v, want %v", got != nil, tt.wantPresent)
 			}
 			if tt.postTestCheck != nil {
 				tt.postTestCheck()
@@ -286,17 +299,17 @@ func Test_fetchNegativeCache(t *testing.T) {
 		{
 			name: "T1_Key_Present",
 			key:  "json",
-			want: negativeCacheKey{key: "json", man: 2},
+			want: negativeCacheKey{key: "json", sstNum: 2},
 			prepareTest: func() {
-				negativeCache[0] = negativeCacheKey{key: "json", man: 2}
+				negativeCache[0] = negativeCacheKey{key: "json", sstNum: 2}
 			},
 		},
 		{
 			name: "T2_Key_Not_Present",
 			key:  "txt",
-			want: negativeCacheKey{key: "txt", man: -1},
+			want: negativeCacheKey{key: "txt", sstNum: -1},
 			prepareTest: func() {
-				negativeCache[2] = negativeCacheKey{key: "json", man: 2}
+				negativeCache[2] = negativeCacheKey{key: "json", sstNum: 2}
 			},
 		},
 	}
@@ -306,7 +319,7 @@ func Test_fetchNegativeCache(t *testing.T) {
 			negativeCachePointer = 0
 			tt.prepareTest()
 			got := fetchNegativeCache(tt.key)
-			if got.key != tt.want.key || got.man != tt.want.man {
+			if got.key != tt.want.key || got.sstNum != tt.want.sstNum {
 				t.Errorf("fetchNegativeCache() = %v, want %v", got, tt.want)
 			}
 		})
@@ -318,7 +331,7 @@ func Test_putNegativeCache(t *testing.T) {
 		name string // description of this test case
 		// Named input parameters for target function.
 		key          string
-		man          int
+		sstNum       int
 		cacheCounter int
 		index        int
 		prepareTest  func()
@@ -326,25 +339,25 @@ func Test_putNegativeCache(t *testing.T) {
 		{
 			name:         "T1-No_Wrap",
 			key:          "json",
-			man:          3,
+			sstNum:       3,
 			index:        3,
 			cacheCounter: 3,
 		},
 		{
 			name:         "T2-Wrap",
 			key:          "json",
-			man:          3,
+			sstNum:       3,
 			index:        0,
 			cacheCounter: negativeCacheLimit,
 		},
 		{
 			name:         "T3-Update_Key",
 			key:          "json",
-			man:          2,
+			sstNum:       2,
 			cacheCounter: 2,
 			index:        0,
 			prepareTest: func() {
-				negativeCache[0] = negativeCacheKey{key: "json", man: 1}
+				negativeCache[0] = negativeCacheKey{key: "json", sstNum: 1}
 			},
 		},
 	}
@@ -355,10 +368,10 @@ func Test_putNegativeCache(t *testing.T) {
 				tt.prepareTest()
 			}
 			negativeCachePointer = tt.cacheCounter
-			putNegativeCache(tt.key, tt.man)
+			putNegativeCache(tt.key, tt.sstNum)
 			checkVal := negativeCache[tt.index]
-			if checkVal.key != tt.key || checkVal.man != tt.man {
-				t.Errorf("incorrect value, expected: %s, %d; got: %v", tt.key, tt.man, checkVal)
+			if checkVal.key != tt.key || checkVal.sstNum != tt.sstNum {
+				t.Errorf("incorrect value, expected: %s, %d; got: %v", tt.key, tt.sstNum, checkVal)
 			}
 		})
 	}
@@ -366,36 +379,27 @@ func Test_putNegativeCache(t *testing.T) {
 
 func Test_flushManifest(t *testing.T) {
 	cleanupFunc := func() {
-		manifest = make([]string, 0)
+		manifest = make(map[spec.SSTLevel][]*spec.SSTMetaData)
 		_ = os.Remove(utility.ManifestName)
 	}
 
 	tests := []struct {
 		name          string
-		inputManifest []string
+		inputManifest map[spec.SSTLevel][]*spec.SSTMetaData
 		wantErr       bool
 		prepareTest   func()
 	}{
 		{
 			name:          "T1-Empty_Manifest",
-			inputManifest: []string{},
+			inputManifest: make(map[spec.SSTLevel][]*spec.SSTMetaData),
 			wantErr:       false,
 		},
 		{
-			name:          "T2-Populated_Manifest",
-			inputManifest: []string{"sst-0.json", "sst-1.json"},
-			wantErr:       false,
-		},
-		{
-			name:          "T3-Overwrite_Existing_Manifest",
-			inputManifest: []string{"sst-new.json"},
-			wantErr:       false,
-			prepareTest: func() {
-				// Pre-create manifest with some old data
-				oldManifest := []string{"sst-old.json"}
-				data, _ := json.MarshalIndent(oldManifest, "", " ")
-				_ = os.WriteFile(utility.ManifestName, data, 0o644)
+			name: "T2-Populated_Manifest",
+			inputManifest: map[spec.SSTLevel][]*spec.SSTMetaData{
+				0: {{Name: "l0/sst-0.json", FirstKey: "a", LastKey: "b"}},
 			},
+			wantErr: false,
 		},
 	}
 	for _, tt := range tests {
@@ -409,14 +413,9 @@ func Test_flushManifest(t *testing.T) {
 
 			manifest = tt.inputManifest
 			gotErr := flushManifest()
-			if gotErr != nil {
-				if !tt.wantErr {
-					t.Errorf("flushManifest() failed: %v", gotErr)
-				}
+			if (gotErr != nil) != tt.wantErr {
+				t.Errorf("flushManifest() error = %v, wantErr %v", gotErr, tt.wantErr)
 				return
-			}
-			if tt.wantErr {
-				t.Fatal("flushManifest() succeeded unexpectedly")
 			}
 
 			// Verify file content
@@ -425,7 +424,7 @@ func Test_flushManifest(t *testing.T) {
 				t.Fatalf("failed to read manifest file: %v", err)
 			}
 
-			var gotManifest []string
+			var gotManifest map[spec.SSTLevel][]*spec.SSTMetaData
 			err = json.Unmarshal(fileContent, &gotManifest)
 			if err != nil {
 				t.Fatalf("failed to unmarshal manifest file: %v", err)
@@ -656,84 +655,51 @@ func Test_loadManifest(t *testing.T) {
 		name      string // description of this test case
 		wantErr   bool
 		setup     func()
-		want      []string
+		want      map[spec.SSTLevel][]*spec.SSTMetaData
 		postCheck func(t *testing.T)
 	}{
 		{
-			name:    "T1-CleanManifest_NoDanglingSSTs",
+			name:    "T1-CleanManifest",
 			wantErr: false,
 			setup: func() {
-				memStore = map[string]Value{
-					"key1": {Value: "val1"},
-					"key2": {Value: "val2"},
-					"json": {Value: "yay"},
+				manifest = map[spec.SSTLevel][]*spec.SSTMetaData{
+					0: {{Name: "sst-0.json", FirstKey: "key1", LastKey: "key2"}},
+					2: {{Name: "sst-2.json", FirstKey: "key3", LastKey: "key4"}},
 				}
-				flushMemTable()
-				memStore = map[string]Value{
-					"key3": {Value: "val3"},
-					"key1": {Value: "Val1"},
-					"txt":  {Value: "val-txt"},
-				}
-				flushMemTable()
 				flushManifest()
 			},
-			want: []string{
-				"sst-0.json",
-				"sst-1.json",
+			want: map[spec.SSTLevel][]*spec.SSTMetaData{
+				0: {{Name: "sst-0.json", FirstKey: "key1", LastKey: "key2"}},
+				2: {{Name: "sst-2.json", FirstKey: "key3", LastKey: "key4"}},
 			},
 		},
 		{
-			name:    "T2-NoManifest_WithDanglingSSTs",
-			wantErr: true,
+			name: "T2-CleanManfist_With_Orphaned_SST",
 			setup: func() {
-				memStore = map[string]Value{
-					"key1": {Value: "val1"},
-					"key2": {Value: "val2"},
-					"json": {Value: "yay"},
+				manifest = map[spec.SSTLevel][]*spec.SSTMetaData{
+					0: {{Name: "sst-0.json", FirstKey: "key1", LastKey: "key2"}},
+					2: {{Name: "sst-2.json", FirstKey: "key3", LastKey: "key4"}},
 				}
-				flushMemTable()
-				memStore = map[string]Value{
-					"key3": {Value: "val3"},
-					"key1": {Value: "Val1"},
-					"txt":  {Value: "val-txt"},
-				}
-				flushMemTable()
-				cleanManifest()
-			},
-		},
-		{
-			name:    "T3-CleanManifest_WithDanglingSSTs",
-			wantErr: false,
-			setup: func() {
-				memStore = map[string]Value{
-					"key1": {Value: "val1"},
-					"key2": {Value: "val2"},
-					"json": {Value: "yay"},
-				}
-				flushMemTable()
-				memStore = map[string]Value{
-					"key3": {Value: "val3"},
-					"key1": {Value: "Val1"},
-					"txt":  {Value: "val-txt"},
-				}
-				flushMemTable()
 				flushManifest()
-				memStore = map[string]Value{
-					"key3": {Value: "val3"},
-					"key1": {Value: "Val1"},
+				level1 := spec.SSTLevel(1)
+				sstName := level1.GetSSTPath("sst-1.json")
+				sstName = sstName + ".tmp"
+				f, err := os.Create(sstName)
+				if err != nil {
+					t.Fatalf("failed to create orphaned sst file: %v", err)
 				}
-				flushMemTable()
-				manifest = make(map[SSTLevel][]*ManifestEntry)
+				f.Close()
 			},
-			want: []string{
-				"sst-0.json",
-				"sst-1.json",
+			want: map[spec.SSTLevel][]*spec.SSTMetaData{
+				0: {{Name: "sst-0.json", FirstKey: "key1", LastKey: "key2"}},
+				2: {{Name: "sst-2.json", FirstKey: "key3", LastKey: "key4"}},
 			},
 			postCheck: func(t *testing.T) {
-				_, err := os.Stat("sst-2.json")
-
-				if err == nil {
-					t.Error("dangling sst present")
+				level1 := spec.SSTLevel(1)
+				sstName := level1.GetSSTPath("sst-1.json")
+				sstName = sstName + ".tmp"
+				if _, err := os.Stat(sstName); !os.IsNotExist(err) {
+					t.Errorf("orphaned SST file was not cleaned up: %s", sstName)
 				}
 			},
 		},
@@ -751,24 +717,13 @@ func Test_loadManifest(t *testing.T) {
 				tt.setup()
 			}
 			gotErr := loadManifest()
-			if gotErr != nil {
-				if !tt.wantErr {
-					t.Errorf("loadManifest() failed: %v", gotErr)
-				}
+			if (gotErr != nil) != tt.wantErr {
+				t.Errorf("loadManifest() error = %v, wantErr %v", gotErr, tt.wantErr)
 				return
 			}
-			if tt.wantErr {
-				t.Fatal("loadManifest() succeeded unexpectedly")
-			}
 
-			if len(tt.want) != len(manifest) {
-				t.Errorf("manifest lengths don't match, got: %d, want: %d", len(tt.want), len(manifest))
-			}
-
-			for index, entry := range tt.want {
-				if entry != manifest[index] {
-					t.Errorf("entry in manifest does not match expected entry, found: %s, expected: %s", manifest[index], entry)
-				}
+			if diff := cmp.Diff(manifest, tt.want); diff != "" {
+				t.Errorf("manifest mismatch (-got +want):\n%s", diff)
 			}
 
 			if tt.postCheck != nil {
