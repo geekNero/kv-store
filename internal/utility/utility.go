@@ -5,6 +5,7 @@ import (
 	"hash/crc32"
 	"kv_store/internal/spec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -71,37 +72,19 @@ func FindKeyContainingSST(key string, sstSet []*spec.SSTMetaData) *spec.SSTMetaD
 }
 
 func FindSSTRange(firstKey string, lastKey string, sstSet []*spec.SSTMetaData) (int, int) {
-
-	low := 0
-	high := len(sstSet) - 1
-	var mid int
-	// find the nearest sst to the range
-	for low <= high {
-		mid = (low + high) / 2
-		if sstSet[mid].FirstKey == firstKey {
-			break
-		} else if sstSet[mid].FirstKey < firstKey {
-			low = mid + 1
-		} else {
-			high = mid - 1
-		}
+	if len(sstSet) == 0 {
+		return 0, 0
 	}
 
-	low = mid
-	high = mid
+	// Find the first SST that could potentially overlap (LastKey >= firstKey)
+	start := sort.Search(len(sstSet), func(i int) bool {
+		return sstSet[i].LastKey >= firstKey
+	})
 
-	// check immediate left
-	if mid-1 >= 0 && sstSet[mid-1].LastKey >= firstKey {
-		low--
-	}
+	// Find the first SST that starts after our range (FirstKey > lastKey)
+	end := sort.Search(len(sstSet), func(i int) bool {
+		return sstSet[i].FirstKey > lastKey
+	})
 
-	// spread the range right
-	for ; mid < len(sstSet); mid++ {
-		if sstSet[mid].FirstKey > lastKey {
-			break
-		}
-		high++
-	}
-
-	return low, high
+	return start, end
 }

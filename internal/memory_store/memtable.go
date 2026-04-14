@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"sort"
 
 	"kv_store/internal/config"
@@ -59,6 +58,14 @@ func flushMemTable() bool {
 	// need to test if reallocating is faster or clearing each entry is faster.
 	manifest[level] = append(manifest[level], sst)
 
+	if len(manifest[level]) > config.Conf.LevelSize[int(level)] {
+		err = triggerL0Compaction()
+		if err != nil {
+			fmt.Println("l0 compaction failed, error: ", err.Error())
+			return false
+		}
+	}
+
 	return true
 }
 
@@ -66,7 +73,7 @@ func writeSST(data []*spec.SSTEntry, level spec.SSTLevel) (*spec.SSTMetaData, er
 
 	sstName := getNextSSTName(level)
 
-	sstPath := filepath.Join(level.FolderString(), sstName)
+	sstPath := level.GetSSTPath(sstName)
 	sstInfo := spec.SSTMetaData{
 		Name: sstName,
 	}
@@ -100,7 +107,7 @@ func writeSST(data []*spec.SSTEntry, level spec.SSTLevel) (*spec.SSTMetaData, er
 
 	err = os.Rename(sstPath+".tmp", sstPath)
 	if err != nil {
-		log.Printf("failed to rename temp sst file with actual path", err.Error())
+		log.Printf("failed to rename temp sst file with actual path: %s", err.Error())
 	}
 
 	// ensure the file rename persists.

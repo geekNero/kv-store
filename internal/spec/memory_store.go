@@ -1,6 +1,9 @@
 package spec
 
-import "fmt"
+import (
+	"fmt"
+	"path/filepath"
+)
 
 const (
 	KeyStorePath = "/keystore/"
@@ -35,4 +38,8 @@ type SSTLevel int
 
 func (level SSTLevel) FolderString() string {
 	return fmt.Sprintf("l%d", int(level))
+}
+
+func (level SSTLevel) GetSSTPath(name string) string {
+	return filepath.Join(level.FolderString(), name)
 }

@@ -19,12 +19,19 @@ func LoadConfig() error {
 		}
 
 		Conf = Config{
-			NextFileID:          make([]uint64, int(spec.MaxLevel)),
+			NextFileID:          make([]uint64, int(spec.MaxLevel)+1),
 			CompactionBatchSize: 2,
+			LevelSize:           make([]int, int(spec.MaxLevel)+1),
 		}
+
+		Conf.LevelSize[0] = 4
 
 		// ensure folders for each level are created
 		for l := spec.SSTLevel(0); l <= spec.MaxLevel; l++ {
+			if l > spec.SSTLevel(0) {
+				Conf.LevelSize[int(l)] = 1000
+			}
+
 			err := os.MkdirAll(l.FolderString(), 0755)
 			if err != nil {
 				log.Printf("failed to create level %d folder, error: %s", int(l), err.Error())

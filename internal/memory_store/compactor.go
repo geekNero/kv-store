@@ -30,9 +30,10 @@ type fileIterator struct {
 
 func NewFileIterator(index int, level spec.SSTLevel) *fileIterator {
 	fileName := manifest[level][index].Name
-	f, err := os.Open(fileName)
+	path := level.GetSSTPath(fileName)
+	f, err := os.Open(path)
 	if err != nil {
-		log.Printf("failed to open file %s during compaction, error: %s", fileName, err.Error())
+		log.Printf("failed to open file %s during compaction, error: %s", path, err.Error())
 		return nil
 	}
 	iterator := &fileIterator{
@@ -145,7 +146,6 @@ func triggerL0Compaction() error {
 	}
 
 	resetNegativeCache()
-	mutationCounter = 0
 
 	return nil
 }
@@ -181,7 +181,7 @@ func multiLevelCompaction(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) er
 	manifest[lowerLevel] = make([]*spec.SSTMetaData, 0)
 
 	for _, file := range lowerManifest {
-		os.Remove(file.Name)
+		os.Remove(lowerLevel.GetSSTPath(file.Name))
 	}
 
 	return nil

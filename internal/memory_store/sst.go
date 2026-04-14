@@ -49,7 +49,8 @@ outer:
 		}
 
 		// TODO: instead of loading the entire file, we can stream records to check through them
-		sstTable, err := loadSST(l0[index].Name)
+		sstPath := spec.SSTLevel(0).GetSSTPath(l0[index].Name)
+		sstTable, err := loadSST(sstPath)
 		if err != nil {
 			return nil, err
 		}
@@ -82,7 +83,7 @@ outer:
 		}
 	}
 
-	putNegativeCache(key, len(manifest)-1)
+	putNegativeCache(key, len(l0)-1)
 
 	return nil, nil
 }
@@ -90,14 +91,12 @@ outer:
 func searchOrderedSSTs(key string, level spec.SSTLevel) *spec.SSTEntry {
 	// need to lock on the SST with the range via binary search
 
-	levelFolder := fmt.Sprintf("l%d", int(level))
-
 	targetSST := utility.FindKeyContainingSST(key, manifest[level])
 	if targetSST == nil {
 		return nil
 	}
 
-	entries, err := loadSST(filepath.Join(levelFolder, targetSST.Name))
+	entries, err := loadSST(level.GetSSTPath(targetSST.Name))
 	if err != nil {
 		log.Printf("failed to load sst of level: %d, sst name: %s, error: %s", int(level), targetSST.Name, err.Error())
 		return nil
@@ -143,10 +142,9 @@ func resetNegativeCache() {
 
 func cleanupOrphanedSSTs() {
 	for key := range manifest {
-		levelName := fmt.Sprintf("l%d", key)
-		entries, err := os.ReadDir(levelName)
+		entries, err := os.ReadDir(key.FolderString())
 		if err != nil {
-			log.Printf("failed to read %s directory, error: %s", levelName, err.Error())
+			log.Printf("failed to read %s directory, error: %s", key.FolderString(), err.Error())
 		}
 
 		for _, entry := range entries {

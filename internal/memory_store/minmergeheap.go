@@ -70,7 +70,7 @@ func compact(iterables []*fileIterator, targetLevel spec.SSTLevel) error {
 		err := iterable.open()
 		if err != nil {
 			log.Println("error when attempting to open iterator, error: ", err.Error())
-			return fmt.Errorf("unable to open iterator, error: ", err.Error())
+			return fmt.Errorf("unable to open iterator, error: %s", err.Error())
 		}
 
 		entry := iterables[index].nextItem()
@@ -156,40 +156,33 @@ func compact(iterables []*fileIterator, targetLevel spec.SSTLevel) error {
 		newSSTs = append(newSSTs, sstInfo)
 	}
 
+	// delete old sst metadata and replace it with new ssts while keeping the manifest sorted
+
 	levelManifest := manifest[targetLevel]
 	finalLevelManifest := []*spec.SSTMetaData{}
 
-	deletedIndex := 0
-	newIndex := 0
-	index := 0
+	deletedFilesMap := map[string]struct{}{}
+	for _, value := range iterables {
+		deletedFilesMap[value.fileName] = struct{}{}
+	}
 
-	// delete older SST entries and add new SST entries while maintaining the sorted order of the manifest.
-	// deletedIndex might not reach it's end as deleted SSTs could be from a different level
-	for index < len(levelManifest) || newIndex < len(newSSTs) {
-		if deletedIndex < len(iterables) && iterables[deletedIndex].fileName == levelManifest[index].Name {
-			deletedIndex++
-			index++
+	newSSTIndex := 0
+	for index := range levelManifest {
+		_, isDeleted := deletedFilesMap[levelManifest[index].Name]
+		if isDeleted {
 			continue
 		}
 
-		if index < len(levelManifest) && newIndex < len(newSSTs) {
-			if levelManifest[index].FirstKey < newSSTs[newIndex].FirstKey {
-				finalLevelManifest = append(finalLevelManifest, levelManifest[index])
-				index++
-			} else {
-				finalLevelManifest = append(finalLevelManifest, newSSTs[newIndex])
-				newIndex++
-			}
-		} else if index < len(levelManifest) {
-			finalLevelManifest = append(finalLevelManifest, levelManifest[index])
-			index++
-		} else if newIndex < len(newSSTs) {
-			finalLevelManifest = append(finalLevelManifest, newSSTs[newIndex])
-			newIndex++
-		} else {
-			fmt.Println("something has gone wrong, else condition should have never been hit!")
+		for newSSTIndex < len(newSSTs) && newSSTs[newSSTIndex].FirstKey < levelManifest[index].FirstKey {
+			finalLevelManifest = append(finalLevelManifest, newSSTs[newSSTIndex])
+			newSSTIndex++
 		}
+		finalLevelManifest = append(finalLevelManifest, levelManifest[index])
+	}
 
+	for newSSTIndex < len(newSSTs) {
+		finalLevelManifest = append(finalLevelManifest, newSSTs[newSSTIndex])
+		newSSTIndex++
 	}
 
 	manifest[targetLevel] = finalLevelManifest
@@ -202,9 +195,9 @@ func compact(iterables []*fileIterator, targetLevel spec.SSTLevel) error {
 
 	// delete older ssts after the new ssts have been written to.
 	for _, file := range iterables {
-		err := os.Remove(file.fileName)
+		err := os.Remove(targetLevel.GetSSTPath(file.fileName))
 		if err != nil {
-			log.Printf("failed to purge older sst: %s after compaction, error: %s", file, err.Error())
+			log.Printf("failed to purge older sst: %s after compaction, error: %s", file.fileName, err.Error())
 		}
 	}
 
