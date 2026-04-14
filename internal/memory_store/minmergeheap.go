@@ -120,7 +120,7 @@ func compact(iterables []*fileIterator, targetLevel spec.SSTLevel) error {
 	for h.Len() > 0 {
 		top := heap.Pop(&h).(*HeapEntry)
 		// Drop tombstone only on the last level
-		if !top.Tombstone && targetLevel < spec.MaxLevel {
+		if !(top.Tombstone && targetLevel == spec.MaxLevel) {
 			compactedData = append(compactedData, top.SSTEntry)
 		}
 
@@ -195,7 +195,7 @@ func compact(iterables []*fileIterator, targetLevel spec.SSTLevel) error {
 
 	// delete older ssts after the new ssts have been written to.
 	for _, file := range iterables {
-		err := os.Remove(targetLevel.GetSSTPath(file.fileName))
+		err := os.Remove(file.level.GetSSTPath(file.fileName))
 		if err != nil {
 			log.Printf("failed to purge older sst: %s after compaction, error: %s", file.fileName, err.Error())
 		}

@@ -179,6 +179,7 @@ func multiLevelCompaction(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) er
 	// empty the lower level
 	lowerManifest := manifest[lowerLevel]
 	manifest[lowerLevel] = make([]*spec.SSTMetaData, 0)
+	flushManifest()
 
 	for _, file := range lowerManifest {
 		os.Remove(lowerLevel.GetSSTPath(file.Name))
