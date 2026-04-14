@@ -66,6 +66,26 @@ func memTableGenerator(num int) map[string]Value {
 	return testMemTable
 }
 
+func sstGenerator(start int, end int, level spec.SSTLevel) (*spec.SSTMetaData, error) {
+	entries := []*spec.SSTEntry{}
+	for i := start; i <= end; i++ {
+		key := fmt.Sprintf("key%d", i)
+		value := fmt.Sprintf("val%d", i)
+
+		entry := spec.SSTEntry{
+			Key: key,
+		}
+		if i%3 == 0 {
+			entry.Tombstone = true
+		} else {
+			entry.Value = &value
+		}
+		entries = append(entries, &entry)
+	}
+
+	return writeSST(entries, level)
+}
+
 func Test_flushMemTable(t *testing.T) {
 	type args struct {
 		inputNextSSTID uint64
@@ -75,21 +95,61 @@ func Test_flushMemTable(t *testing.T) {
 	tests := []struct {
 		name string // description of this test case
 		args
-		want bool
+		want             bool
+		setManifest      map[spec.SSTLevel][]*spec.SSTMetaData
+		expectedManifest map[spec.SSTLevel][]*spec.SSTMetaData
 	}{
 		{
 			name: "T1-No_Manifest_Files",
 			args: args{inputNextSSTID: 0, sstFileName: spec.SSTLevel(0).GetSSTPath("sst-0.json")},
 			want: true,
+			setManifest: map[spec.SSTLevel][]*spec.SSTMetaData{
+				spec.SSTLevel(0): {},
+			},
+			expectedManifest: map[spec.SSTLevel][]*spec.SSTMetaData{
+				spec.SSTLevel(0): {
+					{
+						Name:     "sst-0.json",
+						FirstKey: "key1",
+						LastKey:  "key2",
+					},
+				},
+			},
 		},
 		{
 			name: "T2-Few_Manifest_Files",
 			args: args{inputNextSSTID: 2, sstFileName: spec.SSTLevel(0).GetSSTPath("sst-2.json")},
 			want: true,
+			setManifest: map[spec.SSTLevel][]*spec.SSTMetaData{
+				spec.SSTLevel(0): {
+					{
+						Name: "sst-0.json",
+					},
+					{
+						Name: "sst-1.json",
+					},
+				},
+			},
+			expectedManifest: map[spec.SSTLevel][]*spec.SSTMetaData{
+				spec.SSTLevel(0): {
+					{
+						Name: "sst-0.json",
+					},
+					{
+						Name: "sst-1.json",
+					},
+					{
+						Name:     "sst-2.json",
+						FirstKey: "key1",
+						LastKey:  "key2",
+					},
+				},
+			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			manifest = tt.setManifest
 			memStore = memTableGenerator(2)
 			config.Conf.NextFileID[0] = tt.inputNextSSTID
 			got := flushMemTable()
@@ -122,6 +182,10 @@ func Test_flushMemTable(t *testing.T) {
 				if len(memStore) != 0 {
 					t.Errorf("failed: memStore ain't empty")
 				}
+
+				if diff := cmp.Diff(manifest, tt.expectedManifest); diff != "" {
+					t.Errorf("failed: mainfest not as expected, diff: %s", diff)
+				}
 			}
 			cleanSSTFiles()
 		})
@@ -147,28 +211,24 @@ func Test_checkSST(t *testing.T) {
 		postTestCheck func()
 	}{
 		{
-			name:        "T1_Key_Present",
-			key:         "json",
-			want:        "yay",
+			name:        "T1_Key_Present_in_L0",
+			key:         "key2",
+			want:        "val2",
 			wantPresent: true,
 			wantErr:     false,
 			prepareTest: func() {
-				memStore = map[string]Value{
-					"key1": {Value: "val1"},
-					"key2": {Value: "val2"},
-					"json": {Value: "yay"},
-				}
 
-				// testing independency of SST number
-				config.Conf.NextFileID[0] = 2
-				flushMemTable()
-				memStore = map[string]Value{
-					"key3": {Value: "val3"},
-					"key1": {Value: "Val1"},
-				}
-				flushMemTable()
+				config.Conf.NextFileID[0] = 0
+				config.Conf.NextFileID[1] = 1
+				metadata, _ := sstGenerator(1, 100, spec.SSTLevel(0))
+				manifest[spec.SSTLevel(0)] = append(manifest[spec.SSTLevel(0)], metadata)
+
+				metadata, _ = sstGenerator(90, 100, spec.SSTLevel(0))
+				manifest[spec.SSTLevel(0)] = append(manifest[spec.SSTLevel(0)], metadata)
+
+				metadata, _ = sstGenerator(105, 200, spec.SSTLevel(1))
+				manifest[spec.SSTLevel(1)] = append(manifest[spec.SSTLevel(1)], metadata)
 			},
-			postTestCheck: cleanupFunc,
 		},
 		{
 			name:        "T2_Key_Not_Present",
@@ -177,20 +237,18 @@ func Test_checkSST(t *testing.T) {
 			wantPresent: false,
 			wantErr:     false,
 			prepareTest: func() {
+
 				config.Conf.NextFileID[0] = 0
-				memStore = map[string]Value{
-					"key1": {Value: "val1"},
-					"key2": {Value: "val2"},
-					"json": {Value: "yay"},
-				}
-				flushMemTable()
-				memStore = map[string]Value{
-					"key3": {Value: "val3"},
-					"key1": {Value: "Val1"},
-				}
-				flushMemTable()
+				config.Conf.NextFileID[1] = 1
+				metadata, _ := sstGenerator(1, 100, spec.SSTLevel(0))
+				manifest[spec.SSTLevel(0)] = append(manifest[spec.SSTLevel(0)], metadata)
+
+				metadata, _ = sstGenerator(90, 100, spec.SSTLevel(0))
+				manifest[spec.SSTLevel(0)] = append(manifest[spec.SSTLevel(0)], metadata)
+
+				metadata, _ = sstGenerator(105, 200, spec.SSTLevel(1))
+				manifest[spec.SSTLevel(1)] = append(manifest[spec.SSTLevel(1)], metadata)
 			},
-			postTestCheck: cleanupFunc,
 		},
 		{
 			name:        "T3_Key_Not_Present_Negative_Cache",
@@ -199,24 +257,17 @@ func Test_checkSST(t *testing.T) {
 			wantPresent: false,
 			wantErr:     false,
 			prepareTest: func() {
-				memStore = map[string]Value{
-					"key1": {Value: "val1"},
-					"key2": {Value: "val2"},
-					"json": {Value: "yay"},
-				}
-				flushMemTable()
-				config.Conf.NextFileID[0] = 3
-				memStore = map[string]Value{
-					"key3": {Value: "val3"},
-					"key1": {Value: "Val1"},
-					"txt":  {Value: "val-txt"}, // adding for verification
-				}
-				flushMemTable()
-				memStore = map[string]Value{
-					"key3": {Value: "val3"},
-					"key1": {Value: "Val1"},
-				}
-				flushMemTable()
+
+				config.Conf.NextFileID[0] = 0
+				config.Conf.NextFileID[1] = 1
+				metadata, _ := sstGenerator(1, 100, spec.SSTLevel(0))
+				manifest[spec.SSTLevel(0)] = append(manifest[spec.SSTLevel(0)], metadata)
+
+				metadata, _ = sstGenerator(90, 100, spec.SSTLevel(0))
+				manifest[spec.SSTLevel(0)] = append(manifest[spec.SSTLevel(0)], metadata)
+
+				metadata, _ = sstGenerator(105, 200, spec.SSTLevel(0))
+				manifest[spec.SSTLevel(0)] = append(manifest[spec.SSTLevel(0)], metadata)
 				putNegativeCache("txt", 1)
 			},
 			postTestCheck: func() {
@@ -224,41 +275,75 @@ func Test_checkSST(t *testing.T) {
 				if val.sstNum != 2 {
 					t.Errorf("T3: sstNum value not updated in negative cache: expected: %d, got: %d", 2, val.sstNum)
 				}
-				cleanupFunc()
 			},
 		},
 		{
-			name:        "T4_Key_Deleted",
-			key:         "txt",
+			name:        "T4_Key_Present_in_l1",
+			key:         "key110",
+			want:        "val110",
+			wantPresent: true,
+			wantErr:     false,
+			prepareTest: func() {
+
+				config.Conf.NextFileID[0] = 0
+				config.Conf.NextFileID[1] = 1
+				metadata, _ := sstGenerator(1, 100, spec.SSTLevel(0))
+				manifest[spec.SSTLevel(0)] = append(manifest[spec.SSTLevel(0)], metadata)
+
+				metadata, _ = sstGenerator(90, 100, spec.SSTLevel(0))
+				manifest[spec.SSTLevel(0)] = append(manifest[spec.SSTLevel(0)], metadata)
+
+				metadata, _ = sstGenerator(105, 200, spec.SSTLevel(1))
+				manifest[spec.SSTLevel(1)] = append(manifest[spec.SSTLevel(1)], metadata)
+			},
+		},
+		{
+			name:        "T5_Key_Deleted",
+			key:         "90",
 			want:        "",
 			wantPresent: false,
 			wantErr:     false,
 			prepareTest: func() {
-				memStore = map[string]Value{
-					"key1": {Value: "val1"},
-					"key2": {Value: "val2"},
-					"json": {Value: "yay"},
-				}
-				flushMemTable()
-				config.Conf.NextFileID[0] = 3
-				memStore = map[string]Value{
-					"key3": {Value: "val3"},
-					"key1": {Value: "Val1"},
-					"txt":  {Tombstone: true}, // adding for verification
-				}
-				flushMemTable()
-				memStore = map[string]Value{
-					"key3": {Value: "val3"},
-					"key1": {Value: "Val1"},
-				}
-				flushMemTable()
+				config.Conf.NextFileID[0] = 0
+				config.Conf.NextFileID[1] = 1
+				metadata, _ := sstGenerator(1, 100, spec.SSTLevel(0))
+				manifest[spec.SSTLevel(0)] = append(manifest[spec.SSTLevel(0)], metadata)
+
+				metadata, _ = sstGenerator(90, 100, spec.SSTLevel(0))
+				manifest[spec.SSTLevel(0)] = append(manifest[spec.SSTLevel(0)], metadata)
+
+				metadata, _ = sstGenerator(105, 200, spec.SSTLevel(1))
+				manifest[spec.SSTLevel(1)] = append(manifest[spec.SSTLevel(1)], metadata)
 			},
 			postTestCheck: func() {
-				val := fetchNegativeCache("txt")
-				if val.sstNum != 2 {
+				val := fetchNegativeCache("90")
+				if val.sstNum != 1 {
 					t.Errorf("T4: sstNum value not updated in negative cache: expected: %d, got: %d", 2, val.sstNum)
 				}
-				cleanupFunc()
+			},
+		},
+		{
+			name:        "T6_Key_Delete_in_l2",
+			key:         "key300",
+			want:        "",
+			wantPresent: false,
+			wantErr:     false,
+			prepareTest: func() {
+
+				config.Conf.NextFileID[0] = 0
+				config.Conf.NextFileID[1] = 1
+				config.Conf.NextFileID[2] = 0
+				metadata, _ := sstGenerator(1, 100, spec.SSTLevel(0))
+				manifest[spec.SSTLevel(0)] = append(manifest[spec.SSTLevel(0)], metadata)
+
+				metadata, _ = sstGenerator(90, 100, spec.SSTLevel(0))
+				manifest[spec.SSTLevel(0)] = append(manifest[spec.SSTLevel(0)], metadata)
+
+				metadata, _ = sstGenerator(105, 200, spec.SSTLevel(1))
+				manifest[spec.SSTLevel(1)] = append(manifest[spec.SSTLevel(1)], metadata)
+
+				metadata, _ = sstGenerator(300, 400, spec.SSTLevel(2))
+				manifest[spec.SSTLevel(2)] = append(manifest[spec.SSTLevel(2)], metadata)
 			},
 		},
 	}

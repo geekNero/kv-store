@@ -197,7 +197,7 @@ func addOverlappingSSTRange(iterables []*fileIterator, level spec.SSTLevel) []*f
 	levelManifest := manifest[level]
 
 	start, end := utility.FindSSTRange(firstKey, lastKey, levelManifest)
-	for ; start <= end; start++ {
+	for ; start < end; start++ {
 		iterator := NewFileIterator(start, level)
 		if iterator != nil {
 			iterables = append(iterables, iterator)
