@@ -69,3 +69,39 @@ func FindKeyContainingSST(key string, sstSet []*spec.SSTMetaData) *spec.SSTMetaD
 
 	return nil
 }
+
+func FindSSTRange(firstKey string, lastKey string, sstSet []*spec.SSTMetaData) (int, int) {
+
+	low := 0
+	high := len(sstSet) - 1
+	var mid int
+	// find the nearest sst to the range
+	for low <= high {
+		mid = (low + high) / 2
+		if sstSet[mid].FirstKey == firstKey {
+			break
+		} else if sstSet[mid].FirstKey < firstKey {
+			low = mid + 1
+		} else {
+			high = mid - 1
+		}
+	}
+
+	low = mid
+	high = mid
+
+	// check immediate left
+	if mid-1 >= 0 && sstSet[mid-1].LastKey >= firstKey {
+		low--
+	}
+
+	// spread the range right
+	for ; mid < len(sstSet); mid++ {
+		if sstSet[mid].FirstKey > lastKey {
+			break
+		}
+		high++
+	}
+
+	return low, high
+}

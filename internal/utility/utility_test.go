@@ -249,3 +249,29 @@ func TestFindKeyContainingSST(t *testing.T) {
 		})
 	}
 }
+
+func TestFindSSTRange(t *testing.T) {
+	tests := []struct {
+		name string // description of this test case
+		// Named input parameters for target function.
+		firstKey string
+		lastKey  string
+		sstSet   []*spec.SSTMetaData
+		want     int
+		want2    int
+	}{
+		// TODO: Add test cases.
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, got2 := utility.FindSSTRange(tt.firstKey, tt.lastKey, tt.sstSet)
+			// TODO: update the condition below to compare got with tt.want.
+			if true {
+				t.Errorf("FindSSTRange() = %v, want %v", got, tt.want)
+			}
+			if true {
+				t.Errorf("FindSSTRange() = %v, want %v", got2, tt.want2)
+			}
+		})
+	}
+}

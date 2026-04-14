@@ -8,6 +8,7 @@ import (
 
 	"kv_store/internal/config"
 	"kv_store/internal/spec"
+	"kv_store/internal/utility"
 )
 
 type decodeState string
@@ -188,40 +189,16 @@ func multiLevelCompaction(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) er
 
 func addOverlappingSSTRange(iterables []*fileIterator, level spec.SSTLevel) []*fileIterator {
 	lastIndex := len(iterables) - 1
-	firstKey := manifest[iterables[0].level][iterables[0].index].FirstKey
-	lastKey := manifest[iterables[lastIndex].level][iterables[lastIndex].index].LastKey
+	sourceManifest := manifest[iterables[0].level]
+
+	firstKey := sourceManifest[iterables[0].index].FirstKey
+	lastKey := sourceManifest[iterables[lastIndex].index].LastKey
 
 	levelManifest := manifest[level]
-	low := 0
-	high := len(levelManifest) - 1
-	var mid int
 
-	// find the nearest sst to the range
-	for low <= high {
-		mid = (low + high) / 2
-		if levelManifest[mid].FirstKey == firstKey {
-			break
-		} else if levelManifest[mid].FirstKey < firstKey {
-			low = mid + 1
-		} else {
-			high = mid - 1
-		}
-	}
-
-	// check immediate left
-	if mid-1 > 0 && levelManifest[mid].LastKey >= firstKey {
-		iterator := NewFileIterator(mid, level)
-		if iterator != nil {
-			iterables = append(iterables, iterator)
-		}
-	}
-
-	// spread the range right
-	for i := mid; i < len(levelManifest); i++ {
-		if levelManifest[i].FirstKey > lastKey {
-			break
-		}
-		iterator := NewFileIterator(i, level)
+	start, end := utility.FindSSTRange(firstKey, lastKey, levelManifest)
+	for ; start <= end; start++ {
+		iterator := NewFileIterator(start, level)
 		if iterator != nil {
 			iterables = append(iterables, iterator)
 		}
