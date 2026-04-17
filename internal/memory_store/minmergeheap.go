@@ -59,32 +59,41 @@ func (h MinMergeHeap) Peek() *HeapEntry {
 	return h[0]
 }
 
-func compact(iterables []*fileIterator, targetLevel spec.SSTLevel) error {
+func compact(targetLevel spec.SSTLevel) error {
 	// create a min h and push one entry of each sst into the min h.
 	// each sst should always have atleast one entry, and if it does not then something went
 	// wrong with the sst.
 	h := MinMergeHeap{}
 
-	for index, iterable := range iterables {
+	l := manifest[targetLevel]
+	iterables := make([]*fileIterator, 0, len(l))
 
-		err := iterable.open()
+	for index := range l {
+		iterator := NewFileIterator(index, targetLevel)
+		if iterator == nil {
+			continue
+		}
+
+		err := iterator.open()
 		if err != nil {
 			log.Println("error when attempting to open iterator, error: ", err.Error())
 			return fmt.Errorf("unable to open iterator, error: %s", err.Error())
 		}
 
-		entry := iterables[index].nextItem()
+		iterables = append(iterables, iterator)
+
+		entry := iterator.nextItem()
 		if entry == nil {
-			log.Println("sst has 0 entries, sstname: ", iterable.fileName)
-			iterables[index].close()
+			log.Println("sst has 0 entries, sstname: ", iterator.fileName)
+			iterables[index].close(false)
 			continue
 		}
-		sstID := utility.ExtractSSTFileNumber(iterable.fileName)
+		sstID := utility.ExtractSSTFileNumber(iterator.fileName)
 		h.Push(&HeapEntry{
 			SSTEntry: entry,
 			sstID:    sstID,
 			index:    index,
-			level:    iterable.level,
+			level:    iterator.level,
 		})
 	}
 	heap.Init(&h)
@@ -93,15 +102,13 @@ func compact(iterables []*fileIterator, targetLevel spec.SSTLevel) error {
 
 	compactedData := make([]*spec.SSTEntry, 0)
 
-	newSSTs := []*spec.SSTMetaData{}
-
 	// checks if the file iterator has another entry to provide, if yes
 	// then adds it to the heap, or closes it if not already closed.
 	addNextItemtoHeap := func(index int) {
 		if iterables[index].decodeState == decoding {
 			entry := iterables[index].nextItem()
 			if entry == nil {
-				err := iterables[index].close()
+				err := iterables[index].close(false)
 				if err != nil {
 					log.Println("failed to close exhausted sst file: ", iterables[index].fileName)
 				}
@@ -116,6 +123,8 @@ func compact(iterables []*fileIterator, targetLevel spec.SSTLevel) error {
 			})
 		}
 	}
+
+	newSSTs := []*spec.SSTMetaData{}
 
 	for h.Len() > 0 {
 		top := heap.Pop(&h).(*HeapEntry)
@@ -153,53 +162,26 @@ func compact(iterables []*fileIterator, targetLevel spec.SSTLevel) error {
 			log.Println("failed to write compacted data to sst file, error: ", err.Error())
 			return err
 		}
+
 		newSSTs = append(newSSTs, sstInfo)
 	}
 
 	// delete old sst metadata and replace it with new ssts while keeping the manifest sorted
+	for _, file := range iterables {
 
-	levelManifest := manifest[targetLevel]
-	finalLevelManifest := []*spec.SSTMetaData{}
-
-	deletedFilesMap := map[string]struct{}{}
-	for _, value := range iterables {
-		deletedFilesMap[value.fileName] = struct{}{}
-	}
-
-	newSSTIndex := 0
-	for index := range levelManifest {
-		_, isDeleted := deletedFilesMap[levelManifest[index].Name]
-		if isDeleted {
-			continue
+		err := os.Remove(file.level.GetSSTPath(file.fileName))
+		if err != nil {
+			log.Printf("failed to purge older sst: %s after compaction, error: %s", file.fileName, err.Error())
 		}
 
-		for newSSTIndex < len(newSSTs) && newSSTs[newSSTIndex].FirstKey < levelManifest[index].FirstKey {
-			finalLevelManifest = append(finalLevelManifest, newSSTs[newSSTIndex])
-			newSSTIndex++
-		}
-		finalLevelManifest = append(finalLevelManifest, levelManifest[index])
 	}
 
-	for newSSTIndex < len(newSSTs) {
-		finalLevelManifest = append(finalLevelManifest, newSSTs[newSSTIndex])
-		newSSTIndex++
-	}
-
-	manifest[targetLevel] = finalLevelManifest
+	manifest[targetLevel] = newSSTs
 
 	err := flushManifest()
 	if err != nil {
 		log.Println("failed to flush manifest after compaction, error: ", err.Error())
 		return err
 	}
-
-	// delete older ssts after the new ssts have been written to.
-	for _, file := range iterables {
-		err := os.Remove(file.level.GetSSTPath(file.fileName))
-		if err != nil {
-			log.Printf("failed to purge older sst: %s after compaction, error: %s", file.fileName, err.Error())
-		}
-	}
-
 	return nil
 }

@@ -364,3 +364,94 @@ func TestFindSSTRange(t *testing.T) {
 		})
 	}
 }
+
+func TestIfSSTsIntersect(t *testing.T) {
+	tests := []struct {
+		name string // description of this test case
+		sst1 spec.SSTMetaData
+		sst2 spec.SSTMetaData
+		want int
+	}{
+		{
+			name: "T1-Intersect",
+			sst1: spec.SSTMetaData{
+				FirstKey: "aab",
+				LastKey:  "ccc",
+			},
+			sst2: spec.SSTMetaData{
+				FirstKey: "bac",
+				LastKey:  "ddd",
+			},
+			want: 0,
+		},
+		{
+			name: "T2-Overlap",
+			sst1: spec.SSTMetaData{
+				FirstKey: "aab",
+				LastKey:  "ccc",
+			},
+			sst2: spec.SSTMetaData{
+				FirstKey: "bac",
+				LastKey:  "caa",
+			},
+			want: 0,
+		},
+		{
+			name: "T3-SingleBoundaryMatch",
+			sst1: spec.SSTMetaData{
+				FirstKey: "aab",
+				LastKey:  "ccc",
+			},
+			sst2: spec.SSTMetaData{
+				FirstKey: "ccc",
+				LastKey:  "ddd",
+			},
+			want: 0,
+		},
+		{
+			name: "T4-BothBoundariesMatch",
+			sst1: spec.SSTMetaData{
+				FirstKey: "aab",
+				LastKey:  "ccc",
+			},
+			sst2: spec.SSTMetaData{
+				FirstKey: "aab",
+				LastKey:  "ccc",
+			},
+			want: 0,
+		},
+		{
+			name: "T5-SST1_Smaller",
+			sst1: spec.SSTMetaData{
+				FirstKey: "aab",
+				LastKey:  "ccc",
+			},
+			sst2: spec.SSTMetaData{
+				FirstKey: "ddd",
+				LastKey:  "eee",
+			},
+			want: -1,
+		},
+		{
+			name: "T6-SST2_Smaller",
+			sst2: spec.SSTMetaData{
+				FirstKey: "aab",
+				LastKey:  "ccc",
+			},
+			sst1: spec.SSTMetaData{
+				FirstKey: "ddd",
+				LastKey:  "eee",
+			},
+			want: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := utility.IfSSTsIntersect(&tt.sst1, &tt.sst2)
+			// TODO: update the condition below to compare got with tt.want.
+			if got != tt.want {
+				t.Errorf("IfSSTsIntersect() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

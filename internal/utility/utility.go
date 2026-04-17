@@ -3,12 +3,13 @@ package utility
 import (
 	"encoding/json"
 	"hash/crc32"
-	"kv_store/internal/spec"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode"
+
+	"kv_store/internal/spec"
 )
 
 func IsASCII(s string) bool {
@@ -51,12 +52,11 @@ func CheckPtrStringsEqual(a, b *string) bool {
 }
 
 func FindKeyContainingSST(key string, sstSet []*spec.SSTMetaData) *spec.SSTMetaData {
-
 	low := 0
 	high := len(sstSet) - 1
 
 	for low <= high {
-		mid := int((low + high) / 2)
+		mid := (low + high) / 2
 		element := sstSet[mid]
 
 		if element.FirstKey <= key && element.LastKey >= key {
@@ -87,4 +87,14 @@ func FindSSTRange(firstKey string, lastKey string, sstSet []*spec.SSTMetaData) (
 	})
 
 	return start, end
+}
+
+// IfSSTsIntersect returns 1 if sst1 is greater than sst2, -1 for vice-versa and 0 if they intersect
+func IfSSTsIntersect(sst1 *spec.SSTMetaData, sst2 *spec.SSTMetaData) int {
+	if sst1.FirstKey > sst2.LastKey && sst1.LastKey > sst2.FirstKey {
+		return 1
+	} else if sst2.FirstKey > sst1.LastKey && sst2.LastKey > sst1.FirstKey {
+		return -1
+	}
+	return 0
 }

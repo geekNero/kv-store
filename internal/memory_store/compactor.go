@@ -29,6 +29,10 @@ type fileIterator struct {
 }
 
 func NewFileIterator(index int, level spec.SSTLevel) *fileIterator {
+	if index < 0 || index >= len(manifest[level]) {
+		return nil
+	}
+
 	fileName := manifest[level][index].Name
 	path := level.GetSSTPath(fileName)
 	f, err := os.Open(path)
@@ -89,24 +93,26 @@ func (iterator *fileIterator) nextItem() *spec.SSTEntry {
 	return nil
 }
 
-func (iterator *fileIterator) close() error {
-	if iterator.decodeState != finish {
+func (iterator *fileIterator) close(forceClose bool) error {
+	if iterator.decodeState != finish && !forceClose {
 		log.Println("iterator state was not equal to finish")
 		return fmt.Errorf("iterator state was not equal to finish when closing iterator")
 	}
 
-	bracket, err := iterator.decoder.Token()
-	if err != nil {
-		log.Println("failed to parse file closing bracket, error: ", err.Error())
-		return err
-	}
+	if !forceClose {
 
-	if bracket != json.Delim(']') {
-		log.Println("last token isn't a square bracket")
-		return fmt.Errorf("last token isn't a square bracket when closing iterator")
-	}
+		bracket, err := iterator.decoder.Token()
+		if err != nil {
+			log.Println("failed to parse file closing bracket, error: ", err.Error())
+			return err
+		}
 
-	err = iterator.f.Close()
+		if bracket != json.Delim(']') {
+			log.Println("last token isn't a square bracket")
+			return fmt.Errorf("last token isn't a square bracket when closing iterator")
+		}
+	}
+	err := iterator.f.Close()
 	if err != nil {
 		log.Println("failure while attempting to close file handler, error: ", err.Error())
 		return err
@@ -121,19 +127,7 @@ a ton of file iterators, we will first compact L0 on it's own, after which we ca
 few file iterators at a time.
 */
 func triggerL0Compaction() error {
-	// create iterators for all files in manfiest
-	l0 := manifest[spec.SSTLevel(0)]
-	iterables := make([]*fileIterator, 0, len(l0))
-
-	for index := range l0 {
-		iterator := NewFileIterator(index, spec.SSTLevel(0))
-		if iterator == nil {
-			continue
-		}
-		iterables = append(iterables, iterator)
-	}
-
-	err := compact(iterables, spec.SSTLevel(0))
+	err := compact(spec.SSTLevel(0))
 	if err != nil {
 		log.Println("error occured while compacting l0 into sorted ssts, error: ", err.Error())
 		return err
@@ -150,11 +144,130 @@ func triggerL0Compaction() error {
 	return nil
 }
 
-func multiLevelCompaction(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
+/*
+MergeTheStrips is a simple two way merge where we consider the entire levels
+as long sorted list of strings, but broken into smaller strips. All we need to do is keep on merging
+the next smallest item from either of the levels, and add it to a new strip. If the item is same between both
+the lists we chose the item from the lower level and discard it from the higher level.
+
+Once the strip reaches it's capactiy, we cut it and save it.
+*/
+func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 	if lowerLevel > spec.MaxLevel || upperLevel > spec.MaxLevel {
 		return fmt.Errorf("level should be less than max level: %d, lowerLevel: %d, upperLevel: %d", int(spec.MaxLevel), int(lowerLevel), int(upperLevel))
 	}
 
+	lowerLevelManifest := manifest[lowerLevel]
+	upperLevelManifest := manifest[upperLevel]
+
+	// Narrow the range of upperLevel SSTs to be considered.
+	firstKey := lowerLevelManifest[0].FirstKey
+	lastKey := lowerLevelManifest[len(lowerLevelManifest)-1].LastKey
+
+	// append new ssts to the upper level and rewrite and sort the level manifest later on.
+	// for file in lowerLevel that has to be retained, it should be renamed into the upperLevel and appended
+	// to the upperLevel. For the deleted ssts from upperLevel, update the manifest directly, and empty
+	// their name.
+
+	getNextItem := func(iterator *fileIterator) *spec.SSTEntry {
+		if iterator.decodeState == start {
+			err := iterator.open()
+			if err != nil {
+				return nil
+			}
+		}
+
+		if iterator.decodeState == decoding {
+			entry := iterator.nextItem()
+			if entry != nil {
+				return entry
+			}
+			err := iterator.close(false)
+			if err != nil {
+				log.Println("failed to close iterator in getNextItem, error: ", err.Error())
+			}
+		}
+		return nil
+	}
+
+	indexUpper, endUpper := utility.FindSSTRange(firstKey, lastKey, upperLevelManifest)
+	indexLower, endLower := 0, len(lowerLevelManifest)
+
+	var itemLower, itemUpper *spec.SSTEntry
+
+	iteratorLowerLevel := NewFileIterator(0, lowerLevel)
+	iteratorUpperLevel := NewFileIterator(indexUpper, upperLevel)
+
+	if iteratorLowerLevel == nil || iteratorUpperLevel == nil {
+		return fmt.Errorf("lower/upper level iterator is nil")
+	}
+
+	setNextFileIterator := func(iterator **fileIterator, index *int, level spec.SSTLevel) bool {
+		*index++
+		*iterator = NewFileIterator(*index, level)
+		return *iterator != nil
+	}
+
+	compactedData := []*spec.SSTEntry{}
+
+	for indexLower < endLower && indexUpper < endUpper {
+
+		if iteratorLowerLevel.decodeState == iteratorUpperLevel.decodeState && iteratorLowerLevel.decodeState == start {
+			op := utility.IfSSTsIntersect(lowerLevelManifest[indexLower], upperLevelManifest[indexUpper])
+			// if lowerLevelSST has keys greater than the upperLevelSST, then the next upperLevelSST might
+			// intersect with the lowerLevelSST, hence we move to the next upper sst. The converse is not
+			// true.
+			if op == 1 {
+				iteratorUpperLevel.close(true)
+				if !setNextFileIterator(&iteratorUpperLevel, &indexUpper, upperLevel) {
+					break
+				}
+			} else if op == -1 {
+				iteratorLowerLevel.close(true)
+				lowerLevelManifest[indexLower].Name = getNextSSTName(upperLevel)
+				err := os.Rename(lowerLevel.GetSSTPath(iteratorLowerLevel.fileName), upperLevel.GetSSTPath(lowerLevelManifest[indexLower].Name))
+				if err != nil {
+					fmt.Printf("failed to rename lower sst to upper sst, sstName: %s, level: %d, error: %v", iteratorLowerLevel.fileName, int(lowerLevel), err)
+				}
+				upperLevelManifest = append(upperLevelManifest, lowerLevelManifest[indexLower])
+
+				if !setNextFileIterator(&iteratorLowerLevel, &indexLower, lowerLevel) {
+					break
+				}
+			} else {
+				upperLevelManifest[indexUpper].Name = ""
+			}
+		}
+		if itemLower == nil {
+			itemLower = getNextItem(iteratorLowerLevel)
+			if itemLower == nil && !setNextFileIterator(&iteratorLowerLevel, &indexLower, lowerLevel) {
+				break
+			}
+		}
+		if itemUpper == nil {
+			itemUpper = getNextItem(iteratorUpperLevel)
+			if itemUpper == nil && !setNextFileIterator(&iteratorUpperLevel, &indexUpper, upperLevel) {
+				break
+			}
+		}
+
+		if itemLower.Key < itemUpper.Key {
+			compactedData = append(compactedData, itemLower)
+		} else if itemLower.Key > itemUpper.Key {
+			compactedData = append(compactedData, itemUpper)
+		} else {
+			compactedData = append(compactedData, itemLower)
+			itemUpper = getNextItem(iteratorUpperLevel)
+		}
+
+		// Write logic to dump compacted data
+
+	}
+
+	return nil
+}
+
+func multiLevelCompaction(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 	iterables := []*fileIterator{}
 
 	for i := range manifest[lowerLevel] {
@@ -169,11 +282,11 @@ func multiLevelCompaction(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) er
 			iterables = addOverlappingSSTRange(iterables, upperLevel)
 		}
 
-		err := compact(iterables, upperLevel)
-		if err != nil {
-			fmt.Printf("failed to compact level %d into level %d, error: %s", int(lowerLevel), int(upperLevel), err.Error())
-			return err
-		}
+		// err := compact(iterables, upperLevel)
+		// if err != nil {
+		// 	fmt.Printf("failed to compact level %d into level %d, error: %s", int(lowerLevel), int(upperLevel), err.Error())
+		// 	return err
+		// }
 	}
 
 	// empty the lower level

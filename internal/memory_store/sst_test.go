@@ -1,8 +1,10 @@
 package memorystore
 
 import (
+	"kv_store/internal/config"
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
+	"os"
 	"testing"
 )
 
@@ -11,7 +13,7 @@ func Test_loadSST(t *testing.T) {
 	val1 := "val1"
 
 	tests := []struct {
-		name     string // description of this test case
+		name     string
 		filename string
 		want     []spec.SSTEntry
 		wantErr  bool
@@ -19,7 +21,7 @@ func Test_loadSST(t *testing.T) {
 	}{
 		{
 			name:     "T1-CleanSST",
-			filename: "sst-0.json",
+			filename: "l0/sst-0.json",
 			want: []spec.SSTEntry{
 				{
 					Key:   "key1",
@@ -33,7 +35,7 @@ func Test_loadSST(t *testing.T) {
 			setup: func() {
 				cleanManifest()
 				cleanSSTFiles()
-				loadManifest()
+				config.Conf.NextFileID[0] = 0
 				memStore = memTableGenerator(2)
 				entry2 := memStore["key2"]
 				entry2.Tombstone = true
@@ -43,12 +45,11 @@ func Test_loadSST(t *testing.T) {
 		},
 		{
 			name:     "T2-NoSST",
-			filename: "sst-0.json",
+			filename: "l0/sst-99.json",
 			wantErr:  true,
 			setup: func() {
 				cleanManifest()
 				cleanSSTFiles()
-				loadManifest()
 			},
 		},
 	}
@@ -70,13 +71,43 @@ func Test_loadSST(t *testing.T) {
 				t.Fatal("loadSST() succeeded unexpectedly")
 			}
 			if len(tt.want) != len(got) {
-				t.Fatal("loadSST() output length does not match with expected output")
+				t.Fatalf("loadSST() length mismatch: got %d, want %d", len(got), len(tt.want))
 			}
 			for index, value := range tt.want {
 				if got[index].Key != value.Key || !utility.CheckPtrStringsEqual(got[index].Value, value.Value) || got[index].Tombstone != value.Tombstone {
-					t.Errorf("loadSST() output does not match with expected output, got: %+v, want: %+v", got[index], value)
+					t.Errorf("loadSST() output mismatch at index %d, got: %+v, want: %+v", index, got[index], value)
 				}
 			}
 		})
 	}
 }
+
+func Test_resetNegativeCache(t *testing.T) {
+	negativeCache[0] = negativeCacheKey{key: "k1", sstNum: 1}
+	resetNegativeCache()
+	for _, nc := range negativeCache {
+		if nc.key != "" {
+			t.Errorf("expected empty cache, got %+v", nc)
+		}
+	}
+}
+
+func Test_cleanupOrphanedSSTs(t *testing.T) {
+	cleanManifest()
+	cleanSSTFiles()
+	defer cleanManifest()
+	defer cleanSSTFiles()
+
+	level := spec.SSTLevel(0)
+	manifest[level] = []*spec.SSTMetaData{{Name: "sst-0.json"}}
+	
+	tmpFile := level.GetSSTPath("test.tmp")
+	os.WriteFile(tmpFile, []byte("test"), 0644)
+
+	cleanupOrphanedSSTs()
+
+	if _, err := os.Stat(tmpFile); err == nil {
+		t.Errorf("expected .tmp file to be removed")
+	}
+}
+

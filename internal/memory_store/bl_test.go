@@ -82,7 +82,9 @@ func sstGenerator(start int, end int, level spec.SSTLevel) (*spec.SSTMetaData, e
 		}
 		entries = append(entries, &entry)
 	}
-
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Key < entries[j].Key
+	})
 	return writeSST(entries, level)
 }
 
