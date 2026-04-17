@@ -134,6 +134,8 @@ func triggerL0Compaction() error {
 		return err
 	}
 
+	log.Println("finished first compaction state")
+
 	err = MergeTheStrips(spec.SSTLevel(0), spec.SSTLevel(1))
 	if err != nil {
 		log.Println("failed to compact sst-0 to sst-1, error: ", err.Error())
@@ -229,43 +231,42 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 			}
 			finalManifest = append(finalManifest, metadata)
 		}
-
-		index := len(lowerLevelManifest)
-		if lowerIterable != nil {
-			index = lowerIterable.index
-			if lowerIterable.decodeState == finish {
-				index += 1
+		// remove deleted ssts and add remaining ssts to final manifest
+		for index, sst := range upperLevelManifest {
+			if _, ok := deletedSSTs[index]; ok {
+				err := os.Remove(upperLevel.GetSSTPath(sst.Name))
+				if err != nil {
+					log.Printf("failed to delete sst file post compaction, file: %s, error: %v\n", upperLevel.GetSSTPath(sst.Name), err)
+				}
+			} else {
+				finalManifest = append(finalManifest, sst)
 			}
-		}
-		// if there are ssts remaining from the lowerLevel, move them to the upper level
-		for index < len(lowerLevelManifest) {
-
-			newName := getNextSSTName(upperLevel)
-			err := os.Symlink(lowerLevel.GetSSTPath(lowerLevelManifest[index].Name), upperLevel.GetSSTPath(newName))
-			if err != nil {
-				log.Printf("failed to create symlink of lower level sst: %s, error: %v\n", lowerLevel.GetSSTPath(lowerLevelManifest[index].Name), err)
-				return err
-			}
-
-			finalManifest = append(finalManifest, &spec.SSTMetaData{
-				Name:     newName,
-				FirstKey: lowerLevelManifest[index].FirstKey,
-				LastKey:  lowerLevelManifest[index].LastKey,
-			})
-			index += 1
 		}
 	}
 
-	// remove deleted ssts and add remaining ssts to final manifest
-	for index, sst := range upperLevelManifest {
-		if _, ok := deletedSSTs[index]; ok {
-			err := os.Remove(upperLevel.GetSSTPath(sst.Name))
-			if err != nil {
-				log.Printf("failed to delete sst file post compaction, file: %s, error: %v\n", upperLevel.GetSSTPath(sst.Name), err)
-			}
-		} else {
-			finalManifest = append(finalManifest, sst)
+	index := len(lowerLevelManifest)
+	if lowerIterable != nil {
+		index = lowerIterable.index
+		if lowerIterable.decodeState == finish {
+			index += 1
 		}
+	}
+	// if there are ssts remaining from the lowerLevel, move them to the upper level
+	for index < len(lowerLevelManifest) {
+
+		newName := getNextSSTName(upperLevel)
+		err := os.Link(lowerLevel.GetSSTPath(lowerLevelManifest[index].Name), upperLevel.GetSSTPath(newName))
+		if err != nil {
+			log.Printf("failed to create symlink of lower level sst: %s, error: %v\n", lowerLevel.GetSSTPath(lowerLevelManifest[index].Name), err)
+			return err
+		}
+
+		finalManifest = append(finalManifest, &spec.SSTMetaData{
+			Name:     newName,
+			FirstKey: lowerLevelManifest[index].FirstKey,
+			LastKey:  lowerLevelManifest[index].LastKey,
+		})
+		index += 1
 	}
 
 	// sort final manifest on the first keys.
@@ -358,7 +359,7 @@ func updateIterables(lowerIter *fileIterator, upperIter *fileIterator, lowerLeve
 			upperIter.close()
 		case -1:
 			newName := getNextSSTName(upperIter.level)
-			err := os.Symlink(lowerIter.level.GetSSTPath(lowerIter.fileName), upperIter.level.GetSSTPath(newName))
+			err := os.Link(lowerIter.level.GetSSTPath(lowerIter.fileName), upperIter.level.GetSSTPath(newName))
 			if err != nil {
 				log.Printf("failed to create symlink of lower level sst: %s, error: %v\n", lowerIter.level.GetSSTPath(lowerIter.fileName), err)
 				return nil, nil, err

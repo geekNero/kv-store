@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 
+	"kv_store/internal/spec"
 	"kv_store/internal/utility"
 )
 
@@ -49,8 +50,13 @@ func flushManifest() error {
 func loadManifest() error {
 	bytes, err := os.ReadFile(utility.ManifestName)
 	if err != nil {
-		log.Println("failed to read manifest file, error: ", err.Error())
-		return err
+		if !os.IsNotExist(err) {
+			log.Println("failed to read manifest file, error: ", err.Error())
+			return err
+		}
+		manifest = make(map[spec.SSTLevel][]*spec.SSTMetaData)
+		cleanupOrphanedSSTs()
+		return nil
 	}
 	err = json.Unmarshal(bytes, &manifest)
 	if err != nil {

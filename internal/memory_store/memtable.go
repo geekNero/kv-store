@@ -59,6 +59,7 @@ func flushMemTable() bool {
 	manifest[level] = append(manifest[level], sst)
 
 	if len(manifest[level]) > config.Conf.LevelSize[int(level)] {
+		log.Println(" triggered l0 compaction")
 		err = triggerL0Compaction()
 		if err != nil {
 			fmt.Println("l0 compaction failed, error: ", err.Error())
