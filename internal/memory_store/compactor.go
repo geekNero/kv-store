@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 
 	"kv_store/internal/config"
 	"kv_store/internal/spec"
@@ -133,7 +134,7 @@ func triggerL0Compaction() error {
 		return err
 	}
 
-	err = multiLevelCompaction(spec.SSTLevel(0), spec.SSTLevel(1))
+	err = MergeTheStrips(spec.SSTLevel(0), spec.SSTLevel(1))
 	if err != nil {
 		log.Println("failed to compact sst-0 to sst-1, error: ", err.Error())
 		return err
@@ -167,7 +168,7 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 	// append new ssts to the upper level and rewrite and sort the level manifest later on.
 	// for file in lowerLevel that has to be retained, it should be renamed into the upperLevel and appended
 	// to the upperLevel. For the deleted ssts from upperLevel, update the manifest directly, and empty
-	// their name.
+	// their firstKey.
 
 	getNextItem := func(iterator *fileIterator) *spec.SSTEntry {
 		if iterator.decodeState == start {
@@ -201,6 +202,7 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 	if iteratorLowerLevel == nil || iteratorUpperLevel == nil {
 		return fmt.Errorf("lower/upper level iterator is nil")
 	}
+	compactedData := []*spec.SSTEntry{}
 
 	setNextFileIterator := func(iterator **fileIterator, index *int, level spec.SSTLevel) bool {
 		*index++
@@ -208,7 +210,18 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 		return *iterator != nil
 	}
 
-	compactedData := []*spec.SSTEntry{}
+	flushCompactedData := func() error {
+		if len(compactedData) >= utility.MemTableSize {
+			sstInfo, err := writeSST(compactedData, upperLevel)
+			if err != nil {
+				log.Println("failed to write compacted data to sst file, error: ", err.Error())
+				return err
+			}
+			upperLevelManifest = append(upperLevelManifest, sstInfo)
+			compactedData = make([]*spec.SSTEntry, 0)
+		}
+		return nil
+	}
 
 	for indexLower < endLower && indexUpper < endUpper {
 
@@ -235,7 +248,7 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 					break
 				}
 			} else {
-				upperLevelManifest[indexUpper].Name = ""
+				upperLevelManifest[indexUpper].FirstKey = ""
 			}
 		}
 		if itemLower == nil {
@@ -260,8 +273,42 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 			itemUpper = getNextItem(iteratorUpperLevel)
 		}
 
-		// Write logic to dump compacted data
+		if err := flushCompactedData(); err != nil {
+			return err
+		}
+	}
 
+	finalManifest := []*spec.SSTMetaData{}
+
+	// remove deleted ssts
+	for _, sst := range upperLevelManifest {
+		if sst.FirstKey == "" {
+			err := os.Remove(upperLevel.GetSSTPath(sst.Name))
+			if err != nil {
+				log.Printf("failed to delete sst file post compaction, file: %s, error: %v\n", upperLevel.GetSSTPath(sst.Name), err)
+			}
+		} else {
+			finalManifest = append(finalManifest, sst)
+		}
+	}
+
+	// sort final manifest on the first keys.
+	sort.Slice(finalManifest, func(i, j int) bool {
+		return finalManifest[i].FirstKey < finalManifest[j].FirstKey
+	})
+
+	manifest[upperLevel] = finalManifest
+	manifest[lowerLevel] = []*spec.SSTMetaData{}
+	flushManifest()
+
+	err := os.RemoveAll(lowerLevel.FolderString())
+	if err != nil {
+		log.Printf("failed to delete lower level folder after compaction, folder: %s, error: %v\n", lowerLevel.FolderString(), err)
+	}
+
+	err = os.Mkdir(lowerLevel.FolderString(), 0o755)
+	if err != nil {
+		log.Printf("failed to re-create lower level folder after compaction, folder: %s, error: %v\n", lowerLevel.FolderString(), err)
 	}
 
 	return nil
