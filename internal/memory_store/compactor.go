@@ -7,7 +7,6 @@ import (
 	"os"
 	"sort"
 
-	"kv_store/internal/config"
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
 )
@@ -26,6 +25,7 @@ type fileIterator struct {
 	fileName string
 	level    spec.SSTLevel
 	index    int
+	buffer   *spec.SSTEntry
 	decodeState
 }
 
@@ -48,6 +48,7 @@ func NewFileIterator(index int, level spec.SSTLevel) *fileIterator {
 		fileName:    fileName,
 		level:       level,
 		index:       index,
+		buffer:      &spec.SSTEntry{},
 	}
 	return iterator
 }
@@ -69,50 +70,49 @@ func (iterator *fileIterator) open() error {
 		return fmt.Errorf("first token isn't a square bracket when opening iterator")
 	}
 
-	iterator.decodeState = decoding
+	err = iterator.decoder.Decode(iterator.buffer)
+	if err != nil {
+		log.Println("failed to buffer first entry while opening iterator, error: ", err.Error())
+		return err
+	}
 	return nil
 }
 
 func (iterator *fileIterator) nextItem() *spec.SSTEntry {
-	if iterator.decodeState != decoding {
-		log.Println("iterator state is not equal to decoding")
+	return iterator.buffer
+}
+
+func (iterator *fileIterator) pop() *spec.SSTEntry {
+
+	// set the decodeState to decoding only when an entry has been popped.
+	// nextItem allows one entry accessible even in decodeState = start, refer updateIterables
+	if iterator.decodeState == finish {
 		return nil
 	}
-
+	iterator.decodeState = decoding
+	returnItem := iterator.buffer
 	if iterator.decoder.More() {
 		entry := spec.SSTEntry{}
 		err := iterator.decoder.Decode(&entry)
 		if err != nil {
 			log.Println("failed to decode next item, error: ", err.Error())
-			return nil
+			iterator.buffer = nil
+			return returnItem
 		}
-		return &entry
+		iterator.buffer = &entry
+		return returnItem
 	}
 
-	// mark it done if no more json items remain for parsing
-	iterator.decodeState = finish
-	return nil
+	if iterator.buffer != nil {
+		iterator.buffer = nil
+		iterator.close()
+	}
+	return returnItem
 }
 
-func (iterator *fileIterator) close(forceClose bool) error {
-	if iterator.decodeState != finish && !forceClose {
-		log.Println("iterator state was not equal to finish")
-		return fmt.Errorf("iterator state was not equal to finish when closing iterator")
-	}
+func (iterator *fileIterator) close() error {
 
-	if !forceClose {
-
-		bracket, err := iterator.decoder.Token()
-		if err != nil {
-			log.Println("failed to parse file closing bracket, error: ", err.Error())
-			return err
-		}
-
-		if bracket != json.Delim(']') {
-			log.Println("last token isn't a square bracket")
-			return fmt.Errorf("last token isn't a square bracket when closing iterator")
-		}
-	}
+	iterator.decodeState = finish
 	err := iterator.f.Close()
 	if err != nil {
 		log.Println("failure while attempting to close file handler, error: ", err.Error())
@@ -170,119 +170,95 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 	// to the upperLevel. For the deleted ssts from upperLevel, update the manifest directly, and empty
 	// their firstKey.
 
-	getNextItem := func(iterator *fileIterator) *spec.SSTEntry {
-		if iterator.decodeState == start {
-			err := iterator.open()
-			if err != nil {
-				return nil
-			}
-		}
-
-		if iterator.decodeState == decoding {
-			entry := iterator.nextItem()
-			if entry != nil {
-				return entry
-			}
-			err := iterator.close(false)
-			if err != nil {
-				log.Println("failed to close iterator in getNextItem, error: ", err.Error())
-			}
-		}
-		return nil
-	}
-
 	indexUpper, endUpper := utility.FindSSTRange(firstKey, lastKey, upperLevelManifest)
-	indexLower, endLower := 0, len(lowerLevelManifest)
-
-	var itemLower, itemUpper *spec.SSTEntry
-
-	iteratorLowerLevel := NewFileIterator(0, lowerLevel)
-	iteratorUpperLevel := NewFileIterator(indexUpper, upperLevel)
-
-	if iteratorLowerLevel == nil || iteratorUpperLevel == nil {
-		return fmt.Errorf("lower/upper level iterator is nil")
-	}
-	compactedData := []*spec.SSTEntry{}
-
-	setNextFileIterator := func(iterator **fileIterator, index *int, level spec.SSTLevel) bool {
-		*index++
-		*iterator = NewFileIterator(*index, level)
-		return *iterator != nil
-	}
-
-	flushCompactedData := func() error {
-		if len(compactedData) >= utility.MemTableSize {
-			sstInfo, err := writeSST(compactedData, upperLevel)
-			if err != nil {
-				log.Println("failed to write compacted data to sst file, error: ", err.Error())
-				return err
-			}
-			upperLevelManifest = append(upperLevelManifest, sstInfo)
-			compactedData = make([]*spec.SSTEntry, 0)
-		}
-		return nil
-	}
-
-	for indexLower < endLower && indexUpper < endUpper {
-
-		if iteratorLowerLevel.decodeState == iteratorUpperLevel.decodeState && iteratorLowerLevel.decodeState == start {
-			op := utility.IfSSTsIntersect(lowerLevelManifest[indexLower], upperLevelManifest[indexUpper])
-			// if lowerLevelSST has keys greater than the upperLevelSST, then the next upperLevelSST might
-			// intersect with the lowerLevelSST, hence we move to the next upper sst. The converse is not
-			// true.
-			if op == 1 {
-				iteratorUpperLevel.close(true)
-				if !setNextFileIterator(&iteratorUpperLevel, &indexUpper, upperLevel) {
-					break
-				}
-			} else if op == -1 {
-				iteratorLowerLevel.close(true)
-				lowerLevelManifest[indexLower].Name = getNextSSTName(upperLevel)
-				err := os.Rename(lowerLevel.GetSSTPath(iteratorLowerLevel.fileName), upperLevel.GetSSTPath(lowerLevelManifest[indexLower].Name))
-				if err != nil {
-					fmt.Printf("failed to rename lower sst to upper sst, sstName: %s, level: %d, error: %v", iteratorLowerLevel.fileName, int(lowerLevel), err)
-				}
-				upperLevelManifest = append(upperLevelManifest, lowerLevelManifest[indexLower])
-
-				if !setNextFileIterator(&iteratorLowerLevel, &indexLower, lowerLevel) {
-					break
-				}
-			} else {
-				upperLevelManifest[indexUpper].FirstKey = ""
-			}
-		}
-		if itemLower == nil {
-			itemLower = getNextItem(iteratorLowerLevel)
-			if itemLower == nil && !setNextFileIterator(&iteratorLowerLevel, &indexLower, lowerLevel) {
-				break
-			}
-		}
-		if itemUpper == nil {
-			itemUpper = getNextItem(iteratorUpperLevel)
-			if itemUpper == nil && !setNextFileIterator(&iteratorUpperLevel, &indexUpper, upperLevel) {
-				break
-			}
-		}
-
-		if itemLower.Key < itemUpper.Key {
-			compactedData = append(compactedData, itemLower)
-		} else if itemLower.Key > itemUpper.Key {
-			compactedData = append(compactedData, itemUpper)
-		} else {
-			compactedData = append(compactedData, itemLower)
-			itemUpper = getNextItem(iteratorUpperLevel)
-		}
-
-		if err := flushCompactedData(); err != nil {
-			return err
-		}
-	}
-
 	finalManifest := []*spec.SSTMetaData{}
 
-	// remove deleted ssts
-	for _, sst := range upperLevelManifest {
-		if sst.FirstKey == "" {
+	lowerIterable := NewFileIterator(0, lowerLevel)
+	upperIterable := NewFileIterator(indexUpper, upperLevel)
+	deletedSSTs := map[int]struct{}{}
+
+	if upperIterable != nil {
+		err := lowerIterable.open()
+		if err != nil {
+			return err
+		}
+		err = upperIterable.open()
+		if err != nil {
+			return err
+		}
+
+		compacteData := make([]*spec.SSTEntry, 0, utility.MemTableSize)
+
+		for upperIterable.index < endUpper {
+
+			// update the compacted data
+			op := compareNextIteratorItem(lowerIterable, upperIterable)
+			switch op {
+			case -1:
+				compacteData = pushToCompactedData(compacteData, lowerIterable.pop(), lowerLevel, &finalManifest)
+			case 1:
+				compacteData = pushToCompactedData(compacteData, upperIterable.pop(), upperLevel, &finalManifest)
+				// mark an upperLevel sst as deleted only if it has been popped.
+				deletedSSTs[upperIterable.index] = struct{}{}
+			case 0:
+				compacteData = pushToCompactedData(compacteData, lowerIterable.pop(), lowerLevel, &finalManifest)
+				upperIterable.pop()
+				deletedSSTs[upperIterable.index] = struct{}{}
+			}
+
+			// update the iterables
+			lowerIterable, upperIterable, err = updateIterables(lowerIterable, upperIterable, lowerLevelManifest, upperLevelManifest, &finalManifest)
+			if err != nil {
+				log.Println("error when updating iterables during compaction, error: ", err.Error())
+				return err
+			}
+
+			// this condition would hit if one of the levels is drained, and sst from the other level hasn't been drained yet.
+			if lowerIterable == nil || upperIterable == nil {
+				break
+			}
+
+		}
+
+		// flush the remaining compacted data if any
+		if len(compacteData) > 0 {
+			metadata, err := writeSST(compacteData, upperLevel)
+			if err != nil {
+				log.Println("failed to write new sst during compaction, error: ", err.Error())
+				return err
+			}
+			finalManifest = append(finalManifest, metadata)
+		}
+
+		index := len(lowerLevelManifest)
+		if lowerIterable != nil {
+			index = lowerIterable.index
+			if lowerIterable.decodeState == finish {
+				index += 1
+			}
+		}
+		// if there are ssts remaining from the lowerLevel, move them to the upper level
+		for index < len(lowerLevelManifest) {
+
+			newName := getNextSSTName(upperLevel)
+			err := os.Symlink(lowerLevel.GetSSTPath(lowerLevelManifest[index].Name), upperLevel.GetSSTPath(newName))
+			if err != nil {
+				log.Printf("failed to create symlink of lower level sst: %s, error: %v\n", lowerLevel.GetSSTPath(lowerLevelManifest[index].Name), err)
+				return err
+			}
+
+			finalManifest = append(finalManifest, &spec.SSTMetaData{
+				Name:     newName,
+				FirstKey: lowerLevelManifest[index].FirstKey,
+				LastKey:  lowerLevelManifest[index].LastKey,
+			})
+			index += 1
+		}
+	}
+
+	// remove deleted ssts and add remaining ssts to final manifest
+	for index, sst := range upperLevelManifest {
+		if _, ok := deletedSSTs[index]; ok {
 			err := os.Remove(upperLevel.GetSSTPath(sst.Name))
 			if err != nil {
 				log.Printf("failed to delete sst file post compaction, file: %s, error: %v\n", upperLevel.GetSSTPath(sst.Name), err)
@@ -314,56 +290,90 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 	return nil
 }
 
-func multiLevelCompaction(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
-	iterables := []*fileIterator{}
+func compareNextIteratorItem(lowerIter *fileIterator, upperIter *fileIterator) int {
 
-	for i := range manifest[lowerLevel] {
-		iterable := NewFileIterator(i, lowerLevel)
-		if iterable == nil {
-			continue
-		}
-
-		iterables = append(iterables, iterable)
-
-		if len(iterables) == int(config.Conf.CompactionBatchSize) {
-			iterables = addOverlappingSSTRange(iterables, upperLevel)
-		}
-
-		// err := compact(iterables, upperLevel)
-		// if err != nil {
-		// 	fmt.Printf("failed to compact level %d into level %d, error: %s", int(lowerLevel), int(upperLevel), err.Error())
-		// 	return err
-		// }
+	// this allows us to drain the remaining iterable if one iterator is closed
+	if upperIter.decodeState == finish {
+		return -1
 	}
 
-	// empty the lower level
-	lowerManifest := manifest[lowerLevel]
-	manifest[lowerLevel] = make([]*spec.SSTMetaData, 0)
-	flushManifest()
-
-	for _, file := range lowerManifest {
-		os.Remove(lowerLevel.GetSSTPath(file.Name))
+	if lowerIter.decodeState == finish {
+		return 1
 	}
 
-	return nil
+	if lowerIter.nextItem().Key < upperIter.nextItem().Key {
+		return -1
+	} else if lowerIter.nextItem().Key > upperIter.nextItem().Key {
+		return 1
+	}
+	return 0
 }
 
-func addOverlappingSSTRange(iterables []*fileIterator, level spec.SSTLevel) []*fileIterator {
-	lastIndex := len(iterables) - 1
-	sourceManifest := manifest[iterables[0].level]
+func pushToCompactedData(compactedData []*spec.SSTEntry, item *spec.SSTEntry, level spec.SSTLevel, newSSTs *[]*spec.SSTMetaData) []*spec.SSTEntry {
+	compactedData = append(compactedData, item)
 
-	firstKey := sourceManifest[iterables[0].index].FirstKey
-	lastKey := sourceManifest[iterables[lastIndex].index].LastKey
+	if len(compactedData) == utility.MemTableSize {
+		metadata, err := writeSST(compactedData, level)
+		if err != nil {
+			log.Println("failed to write new sst during compaction, error: ", err.Error())
+			return nil
+		}
 
-	levelManifest := manifest[level]
+		*newSSTs = append(*newSSTs, metadata)
+		return make([]*spec.SSTEntry, 0, utility.MemTableSize)
+	}
+	return compactedData
+}
 
-	start, end := utility.FindSSTRange(firstKey, lastKey, levelManifest)
-	for ; start < end; start++ {
-		iterator := NewFileIterator(start, level)
-		if iterator != nil {
-			iterables = append(iterables, iterator)
+func updateIterables(lowerIter *fileIterator, upperIter *fileIterator, lowerLevelManifest, upperLevelManifest []*spec.SSTMetaData, newSSTs *[]*spec.SSTMetaData) (*fileIterator, *fileIterator, error) {
+
+	if lowerIter.decodeState == finish {
+		temp := NewFileIterator(lowerIter.index+1, lowerIter.level)
+		if temp != nil {
+			err := temp.open()
+			if err != nil {
+				return nil, upperIter, err
+			}
+			lowerIter = temp
 		}
 	}
 
-	return iterables
+	if upperIter.decodeState == finish {
+		temp := NewFileIterator(upperIter.index+1, upperIter.level)
+		if temp != nil {
+			err := temp.open()
+			if err != nil {
+				return lowerIter, nil, err
+			}
+			upperIter = temp
+		}
+
+	}
+
+	for lowerIter.decodeState == start && upperIter.decodeState == start {
+
+		op := utility.CompareSSTs(lowerLevelManifest[lowerIter.index], upperLevelManifest[upperIter.index])
+		switch op {
+		case 1:
+			upperIter.close()
+		case -1:
+			newName := getNextSSTName(upperIter.level)
+			err := os.Symlink(lowerIter.level.GetSSTPath(lowerIter.fileName), upperIter.level.GetSSTPath(newName))
+			if err != nil {
+				log.Printf("failed to create symlink of lower level sst: %s, error: %v\n", lowerIter.level.GetSSTPath(lowerIter.fileName), err)
+				return nil, nil, err
+			}
+
+			*newSSTs = append(*newSSTs, &spec.SSTMetaData{
+				Name:     newName,
+				FirstKey: lowerLevelManifest[lowerIter.index].FirstKey,
+				LastKey:  lowerLevelManifest[lowerIter.index].LastKey,
+			})
+			lowerIter.close()
+		default:
+			return lowerIter, upperIter, nil
+		}
+
+	}
+	return lowerIter, upperIter, nil
 }

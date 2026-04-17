@@ -82,10 +82,9 @@ func compact(targetLevel spec.SSTLevel) error {
 
 		iterables = append(iterables, iterator)
 
-		entry := iterator.nextItem()
+		entry := iterator.pop()
 		if entry == nil {
 			log.Println("sst has 0 entries, sstname: ", iterator.fileName)
-			iterables[index].close(false)
 			continue
 		}
 		sstID := utility.ExtractSSTFileNumber(iterator.fileName)
@@ -106,12 +105,8 @@ func compact(targetLevel spec.SSTLevel) error {
 	// then adds it to the heap, or closes it if not already closed.
 	addNextItemtoHeap := func(index int) {
 		if iterables[index].decodeState == decoding {
-			entry := iterables[index].nextItem()
+			entry := iterables[index].pop()
 			if entry == nil {
-				err := iterables[index].close(false)
-				if err != nil {
-					log.Println("failed to close exhausted sst file: ", iterables[index].fileName)
-				}
 				return
 			}
 

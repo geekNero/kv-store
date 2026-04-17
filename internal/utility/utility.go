@@ -89,8 +89,8 @@ func FindSSTRange(firstKey string, lastKey string, sstSet []*spec.SSTMetaData) (
 	return start, end
 }
 
-// IfSSTsIntersect returns 1 if sst1 is greater than sst2, -1 for vice-versa and 0 if they intersect
-func IfSSTsIntersect(sst1 *spec.SSTMetaData, sst2 *spec.SSTMetaData) int {
+// CompareSSTs returns 1 if sst1 is greater than sst2, -1 for vice-versa and 0 if they intersect
+func CompareSSTs(sst1 *spec.SSTMetaData, sst2 *spec.SSTMetaData) int {
 	if sst1.FirstKey > sst2.LastKey && sst1.LastKey > sst2.FirstKey {
 		return 1
 	} else if sst2.FirstKey > sst1.LastKey && sst2.LastKey > sst1.FirstKey {

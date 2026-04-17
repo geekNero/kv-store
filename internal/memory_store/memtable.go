@@ -99,15 +99,16 @@ func writeSST(data []*spec.SSTEntry, level spec.SSTLevel) (*spec.SSTMetaData, er
 		fmt.Printf("failed to write to sst file during flush: %s, err: %v\n", sstName, err.Error())
 		return nil, err
 	}
-	err = f.Sync()
-	if err != nil {
-		log.Printf("failed to sync SSTFile - %s, error: %s", sstName, err.Error())
-		return nil, err
-	}
 
 	err = os.Rename(sstPath+".tmp", sstPath)
 	if err != nil {
 		log.Printf("failed to rename temp sst file with actual path: %s", err.Error())
+	}
+
+	err = f.Sync()
+	if err != nil {
+		log.Printf("failed to sync SSTFile - %s, error: %s", sstName, err.Error())
+		return nil, err
 	}
 
 	// ensure the file rename persists.
