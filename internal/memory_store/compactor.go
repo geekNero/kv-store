@@ -54,6 +54,7 @@ func NewFileIterator(index int, level spec.SSTLevel) *fileIterator {
 }
 
 func (iterator *fileIterator) open() error {
+	// we won't change the state until atleast one item from this iterator is used.
 	if iterator.decodeState != start {
 		log.Println("iterator state is not equal to start")
 		return fmt.Errorf("iterator state not equal to start when opening iterator")
@@ -70,6 +71,8 @@ func (iterator *fileIterator) open() error {
 		return fmt.Errorf("first token isn't a square bracket when opening iterator")
 	}
 
+	// pre-load atleast one item in the buffer, it's valid to error out if we can't get
+	// the first item.
 	err = iterator.decoder.Decode(iterator.buffer)
 	if err != nil {
 		log.Println("failed to buffer first entry while opening iterator, error: ", err.Error())
@@ -79,6 +82,7 @@ func (iterator *fileIterator) open() error {
 }
 
 func (iterator *fileIterator) nextItem() *spec.SSTEntry {
+	// peek at the iterator value
 	return iterator.buffer
 }
 
@@ -99,6 +103,7 @@ func (iterator *fileIterator) pop() *spec.SSTEntry {
 			iterator.buffer = nil
 			return returnItem
 		}
+		// return buffer and buffer next item
 		iterator.buffer = &entry
 		return returnItem
 	}
@@ -179,7 +184,10 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 	upperIterable := NewFileIterator(indexUpper, upperLevel)
 	deletedSSTs := map[int]struct{}{}
 
+	// upperIterable can be nil if there is no over lap between both the levels or if upperLevel is empty
 	if upperIterable != nil {
+
+		// valid crash out if any iterable does not open
 		err := lowerIterable.open()
 		if err != nil {
 			return err
@@ -189,8 +197,10 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 			return err
 		}
 
+		// set the backing array size so that it does not get reallocated.
 		compacteData := make([]*spec.SSTEntry, 0, utility.MemTableSize)
 
+		// the range is centered arround lower level, therefore we can reliably iterate over upper level.
 		for upperIterable.index < endUpper {
 
 			// update the compacted data
@@ -201,21 +211,28 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 			case 1:
 				compacteData = pushToCompactedData(compacteData, upperIterable.pop(), upperLevel, &finalManifest)
 				// mark an upperLevel sst as deleted only if it has been popped.
+
+				// if upper level sst is mutated than mark it deleted
 				deletedSSTs[upperIterable.index] = struct{}{}
 			case 0:
+				// if both keys are equal, pick the item from lowerLevel.
 				compacteData = pushToCompactedData(compacteData, lowerIterable.pop(), lowerLevel, &finalManifest)
+				// drain upperLevel item
 				upperIterable.pop()
+				// if upper level sst is mutated than mark it deleted
 				deletedSSTs[upperIterable.index] = struct{}{}
 			}
 
 			// update the iterables
 			lowerIterable, upperIterable, err = updateIterables(lowerIterable, upperIterable, lowerLevelManifest, upperLevelManifest, &finalManifest)
+			// an error is returned when we do not get an iterable necessary for complete compaction.
 			if err != nil {
 				log.Println("error when updating iterables during compaction, error: ", err.Error())
 				return err
 			}
 
-			// this condition would hit if one of the levels is drained, and sst from the other level hasn't been drained yet.
+			// edit: after the above code changes, this condition should not be hit in a clean scenario, as the iterables if nil would have an
+			// error along with them.
 			if lowerIterable == nil || upperIterable == nil {
 				break
 			}
@@ -293,7 +310,7 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 
 func compareNextIteratorItem(lowerIter *fileIterator, upperIter *fileIterator) int {
 
-	// this allows us to drain the remaining iterable if one iterator is closed
+	// this allows us to drain the remaining iterator if one iterator is closed
 	if upperIter.decodeState == finish {
 		return -1
 	}
@@ -310,6 +327,7 @@ func compareNextIteratorItem(lowerIter *fileIterator, upperIter *fileIterator) i
 	return 0
 }
 
+// pushToCompactedData handles appending the sst entry to compactedData list, and also handles flushing it to an sst incase it crosses the size limit.
 func pushToCompactedData(compactedData []*spec.SSTEntry, item *spec.SSTEntry, level spec.SSTLevel, newSSTs *[]*spec.SSTMetaData) []*spec.SSTEntry {
 	compactedData = append(compactedData, item)
 
@@ -326,55 +344,71 @@ func pushToCompactedData(compactedData []*spec.SSTEntry, item *spec.SSTEntry, le
 	return compactedData
 }
 
+// add a new iterator for each level if possible, if it errors out break the compaction process.
+// if no new iterator is possible for a level, maintain the old iterator to allow the remaining iterator to be drained out.
 func updateIterables(lowerIter *fileIterator, upperIter *fileIterator, lowerLevelManifest, upperLevelManifest []*spec.SSTMetaData, newSSTs *[]*spec.SSTMetaData) (*fileIterator, *fileIterator, error) {
 
-	if lowerIter.decodeState == finish {
-		temp := NewFileIterator(lowerIter.index+1, lowerIter.level)
-		if temp != nil {
-			err := temp.open()
-			if err != nil {
-				return nil, upperIter, err
-			}
-			lowerIter = temp
-		}
-	}
+	for {
+		if lowerIter.decodeState == finish {
 
-	if upperIter.decodeState == finish {
-		temp := NewFileIterator(upperIter.index+1, upperIter.level)
-		if temp != nil {
-			err := temp.open()
-			if err != nil {
-				return lowerIter, nil, err
+			temp := NewFileIterator(lowerIter.index+1, lowerIter.level)
+			// for a non-error scenario, do not assign the nil iterator back to retain the state of the old iterator
+			if temp != nil {
+				err := temp.open()
+				if err != nil {
+					return nil, upperIter, err
+				}
+				lowerIter = temp
 			}
-			upperIter = temp
 		}
 
-	}
-
-	for lowerIter.decodeState == start && upperIter.decodeState == start {
-
-		op := utility.CompareSSTs(lowerLevelManifest[lowerIter.index], upperLevelManifest[upperIter.index])
-		switch op {
-		case 1:
-			upperIter.close()
-		case -1:
-			newName := getNextSSTName(upperIter.level)
-			err := os.Link(lowerIter.level.GetSSTPath(lowerIter.fileName), upperIter.level.GetSSTPath(newName))
-			if err != nil {
-				log.Printf("failed to create symlink of lower level sst: %s, error: %v\n", lowerIter.level.GetSSTPath(lowerIter.fileName), err)
-				return nil, nil, err
+		if upperIter.decodeState == finish {
+			// for a non-error scenario, do not assign the nil iterator back to retain the state of the old iterator
+			temp := NewFileIterator(upperIter.index+1, upperIter.level)
+			if temp != nil {
+				err := temp.open()
+				if err != nil {
+					return lowerIter, nil, err
+				}
+				upperIter = temp
 			}
 
-			*newSSTs = append(*newSSTs, &spec.SSTMetaData{
-				Name:     newName,
-				FirstKey: lowerLevelManifest[lowerIter.index].FirstKey,
-				LastKey:  lowerLevelManifest[lowerIter.index].LastKey,
-			})
-			lowerIter.close()
-		default:
+		}
+
+		// if both the iterators are new, we can check if they are relevant to each other
+		// before using any of them. If level A has an sst with both it's first and last keys lexiographically lower than
+		// the other level B, then there are no more ssts to be compared from level B for that SST.
+		if lowerIter.decodeState == start && upperIter.decodeState == start {
+			op := utility.CompareSSTs(lowerLevelManifest[lowerIter.index], upperLevelManifest[upperIter.index])
+			switch op {
+			case 1:
+				// let the next iteration handle opening of a new file iterator
+				upperIter.close()
+
+			case -1:
+				// copy the the sst of lower level to the upper level
+				newName := getNextSSTName(upperIter.level)
+				err := os.Link(lowerIter.level.GetSSTPath(lowerIter.fileName), upperIter.level.GetSSTPath(newName))
+				if err != nil {
+					log.Printf("failed to create symlink of lower level sst: %s, error: %v\n", lowerIter.level.GetSSTPath(lowerIter.fileName), err)
+					return nil, nil, err
+				}
+
+				*newSSTs = append(*newSSTs, &spec.SSTMetaData{
+					Name:     newName,
+					FirstKey: lowerLevelManifest[lowerIter.index].FirstKey,
+					LastKey:  lowerLevelManifest[lowerIter.index].LastKey,
+				})
+
+				// let the next iteration handle opening of a new file iterator
+				lowerIter.close()
+
+			// exit the loop
+			default:
+				return lowerIter, upperIter, nil
+			}
+		} else {
 			return lowerIter, upperIter, nil
 		}
-
 	}
-	return lowerIter, upperIter, nil
 }
