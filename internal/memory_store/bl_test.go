@@ -16,6 +16,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	os.Remove("config.json")
 	config.LoadConfig()
 	// Ensure directories exist
 	for l := spec.SSTLevel(0); l <= spec.MaxLevel; l++ {
@@ -69,8 +70,8 @@ func memTableGenerator(num int) map[string]Value {
 func sstGenerator(start int, end int, level spec.SSTLevel) (*spec.SSTMetaData, error) {
 	entries := []*spec.SSTEntry{}
 	for i := start; i <= end; i++ {
-		key := fmt.Sprintf("key%d", i)
-		value := fmt.Sprintf("val%d", i)
+		key := fmt.Sprintf("key%05d", i)
+		value := fmt.Sprintf("val%d", level)
 
 		entry := spec.SSTEntry{
 			Key: key,
