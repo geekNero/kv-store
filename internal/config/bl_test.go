@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"testing"
+
 	"kv_store/internal/spec"
 )
 
@@ -16,17 +17,17 @@ func TestConfig(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadConfig failed: %v", err)
 		}
-		if Conf.CompactionBatchSize != 2 {
-			t.Errorf("expected default CompactionBatchSize 2, got %d", Conf.CompactionBatchSize)
+		if len(Conf.LevelSize) != int(spec.DefaultMaxLevel)+1 {
+			t.Errorf("expected LevelSize length %d, got %d", int(spec.DefaultMaxLevel)+1, len(Conf.LevelSize))
 		}
-		if len(Conf.LevelSize) != int(spec.MaxLevel)+1 {
-			t.Errorf("expected LevelSize length %d, got %d", int(spec.MaxLevel)+1, len(Conf.LevelSize))
+		if Conf.MaxLevels != spec.DefaultMaxLevel {
+			t.Errorf("expected MaxLevels %d, got %d", spec.DefaultMaxLevel, Conf.MaxLevels)
 		}
 	})
 
 	t.Run("FlushAndLoad", func(t *testing.T) {
-		Conf.CompactionBatchSize = 10
 		Conf.NextFileID[0] = 100
+		Conf.MaxLevels = 10
 		err := FlushConfig()
 		if err != nil {
 			t.Fatalf("FlushConfig failed: %v", err)
@@ -39,11 +40,11 @@ func TestConfig(t *testing.T) {
 			t.Fatalf("LoadConfig failed: %v", err)
 		}
 
-		if Conf.CompactionBatchSize != 10 {
-			t.Errorf("expected CompactionBatchSize 10, got %d", Conf.CompactionBatchSize)
-		}
 		if Conf.NextFileID[0] != 100 {
 			t.Errorf("expected NextFileID[0] 100, got %d", Conf.NextFileID[0])
+		}
+		if Conf.MaxLevels != 10 {
+			t.Errorf("expected Maxlevels 10, got: %d", Conf.MaxLevels)
 		}
 	})
 }

@@ -2,15 +2,15 @@ package config
 
 import (
 	"encoding/json"
-	"kv_store/internal/spec"
 	"log"
 	"os"
+
+	"kv_store/internal/spec"
 )
 
 var Conf Config
 
 func LoadConfig() error {
-
 	configFile, err := os.ReadFile(configPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -19,20 +19,20 @@ func LoadConfig() error {
 		}
 
 		Conf = Config{
-			NextFileID:          make([]uint64, int(spec.MaxLevel)+1),
-			CompactionBatchSize: 2,
-			LevelSize:           make([]int, int(spec.MaxLevel)+1),
+			NextFileID: make([]uint64, spec.DefaultMaxLevel+1),
+			LevelSize:  make([]int, spec.DefaultMaxLevel+1),
+			MaxLevels:  spec.DefaultMaxLevel,
 		}
 
 		Conf.LevelSize[0] = 4
 
 		// ensure folders for each level are created
-		for l := spec.SSTLevel(0); l <= spec.MaxLevel; l++ {
-			if l > spec.SSTLevel(0) {
-				Conf.LevelSize[int(l)] = 1000
+		for l := 0; l <= Conf.MaxLevels; l++ {
+			if l > 0 {
+				Conf.LevelSize[l] = spec.DefaultLevelCapacity
 			}
 
-			err := os.MkdirAll(l.FolderString(), 0755)
+			err := os.MkdirAll(spec.SSTLevel(l).FolderString(), 0o755)
 			if err != nil {
 				log.Printf("failed to create level %d folder, error: %s", int(l), err.Error())
 				return err
@@ -52,7 +52,6 @@ func LoadConfig() error {
 }
 
 func FlushConfig() error {
-
 	f, err := os.Create(configPath)
 	if err != nil {
 		log.Println("failed to create config file, error: ", err.Error())
