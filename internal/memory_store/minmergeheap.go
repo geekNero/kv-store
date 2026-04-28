@@ -124,7 +124,7 @@ func compact(targetLevel spec.SSTLevel) error {
 	for h.Len() > 0 {
 		top := heap.Pop(&h).(*HeapEntry)
 		// Drop tombstone only on the last level
-		if !(top.Tombstone && targetLevel == spec.MaxLevel) {
+		if !(top.Tombstone && targetLevel == spec.DefaultMaxLevel) {
 			compactedData = append(compactedData, top.SSTEntry)
 		}
 

@@ -71,7 +71,6 @@ func flushMemTable() bool {
 }
 
 func writeSST(data []*spec.SSTEntry, level spec.SSTLevel) (*spec.SSTMetaData, error) {
-
 	sstName := getNextSSTName(level)
 
 	sstPath := level.GetSSTPath(sstName)
@@ -121,7 +120,7 @@ func writeSST(data []*spec.SSTEntry, level spec.SSTLevel) (*spec.SSTMetaData, er
 }
 
 func getNextSSTName(level spec.SSTLevel) string {
-	if level > spec.MaxLevel {
+	if level > spec.DefaultMaxLevel {
 		return ""
 	}
 

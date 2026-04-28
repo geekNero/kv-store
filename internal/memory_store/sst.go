@@ -70,7 +70,7 @@ outer:
 		// check higher levels
 		level := spec.SSTLevel(1)
 
-		for level <= spec.MaxLevel {
+		for level <= spec.DefaultMaxLevel {
 			value := searchOrderedSSTs(key, level)
 			if value != nil {
 				if value.Tombstone {

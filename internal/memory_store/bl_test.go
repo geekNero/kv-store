@@ -19,7 +19,7 @@ func TestMain(m *testing.M) {
 	os.Remove("config.json")
 	config.LoadConfig()
 	// Ensure directories exist
-	for l := spec.SSTLevel(0); l <= spec.MaxLevel; l++ {
+	for l := spec.SSTLevel(0); l <= spec.DefaultMaxLevel; l++ {
 		os.MkdirAll(l.FolderString(), 0o755)
 	}
 	os.Exit(m.Run())
@@ -27,7 +27,7 @@ func TestMain(m *testing.M) {
 
 func cleanSSTFiles() {
 	// Cleanup any sst-files in all levels
-	for l := spec.SSTLevel(0); l <= spec.MaxLevel; l++ {
+	for l := spec.SSTLevel(0); l <= spec.DefaultMaxLevel; l++ {
 		files, err := filepath.Glob(l.GetSSTPath("sst*.json"))
 		if err != nil {
 			fmt.Printf("Failed to cleanup sst-files in %s post test case execution\n", l.FolderString())
