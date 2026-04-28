@@ -1,11 +1,15 @@
 package memorystore
 
 import (
+	"fmt"
 	"os"
+	"sort"
 	"testing"
 
 	"kv_store/internal/config"
 	"kv_store/internal/spec"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestNewFileIterator(t *testing.T) {
@@ -118,7 +122,7 @@ func Test_triggerL0Compaction(t *testing.T) {
 
 	t.Run("BasicL0ToL1", func(t *testing.T) {
 		cleanup()
-		// defer cleanup()
+		defer cleanup()
 
 		config.Conf.NextFileID[0] = 0
 		config.Conf.NextFileID[1] = 0
@@ -137,10 +141,13 @@ func Test_triggerL0Compaction(t *testing.T) {
 		manifest[0] = append(manifest[0], data)
 
 		// l1 files
+		// completely intersects with l1
 		data, _ = sstGenerator(110, 190, 1)
 		manifest[1] = append(manifest[1], data)
+		// partially intersects with l0
 		data, _ = sstGenerator(199, 299, 1)
 		manifest[1] = append(manifest[1], data)
+		// no intersection with l0
 		data, _ = sstGenerator(790, 899, 1)
 		manifest[1] = append(manifest[1], data)
 
@@ -153,22 +160,52 @@ func Test_triggerL0Compaction(t *testing.T) {
 			t.Errorf("expected 0 L0 files after compaction, got %d", len(manifest[0]))
 		}
 
-		if len(manifest[1]) == 0 {
-			t.Errorf("expected some L1 files after compaction, got 0")
+		// compare manifest data
+		config.Conf.NextFileID[1] = 2
+		wantManifest1 := make([]*spec.SSTMetaData, 0, 2)
+		wantManifest1 = append(wantManifest1, &spec.SSTMetaData{
+			Name:     getNextSSTName(1),
+			FirstKey: fmt.Sprintf("key%05d", 790),
+			LastKey:  fmt.Sprintf("key%05d", 899),
+		},
+			&spec.SSTMetaData{
+				Name:     getNextSSTName(1),
+				FirstKey: fmt.Sprintf("key%05d", 1),
+				LastKey:  fmt.Sprintf("key%05d", 299),
+			})
+
+		sort.Slice(wantManifest1, func(i, j int) bool {
+			return wantManifest1[i].FirstKey < wantManifest1[j].FirstKey
+		})
+
+		if diff := cmp.Diff(wantManifest1, manifest[1]); diff != "" {
+			t.Errorf("L1 metadata is incorrect, diff: %s", diff)
 		}
 
-		// // Verify data in L1
-		// found := false
-		// for _, sst := range manifest[1] {
-		// 	entries, _ := loadSST(spec.SSTLevel(1).GetSSTPath(sst.Name))
-		// 	for _, entry := range entries {
-		// 		if entry.Key == "key1" {
-		// 			found = true
-		// 		}
-		// 	}
-		// }
-		// if !found {
-		// 	t.Errorf("key1 not found in L1 after compaction")
-		// }
+		// set the expected SST
+		wantSST := sstDataGenerator(1, 200, 0)
+		wantSST = append(wantSST, sstDataGenerator(201, 299, 1)...)
+		compareWithSSTIndex := func(index int) {
+			gotSST, err := loadSST(spec.SSTLevel(1).GetSSTPath(wantManifest1[index].Name))
+			if err != nil {
+				t.Fatalf("failed to loadSST for the test, sstname: %s", wantManifest1[index].Name)
+			}
+
+			if len(wantSST) != len(gotSST) {
+				t.Fatalf("SST lenghts don't match, want: %d, got: %d", len(wantSST), len(gotSST))
+			}
+
+			for i, item := range wantSST {
+				if diff := cmp.Diff(*item, gotSST[i]); diff != "" {
+					t.Fatalf("want SST item: %+v, does not match got SST item: %+v", *item, gotSST[i])
+				}
+			}
+		}
+
+		compareWithSSTIndex(0)
+
+		// reset the sst to compare it with next one
+		wantSST = sstDataGenerator(790, 899, 1)
+		compareWithSSTIndex(1)
 	})
 }

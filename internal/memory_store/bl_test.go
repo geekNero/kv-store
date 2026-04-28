@@ -20,7 +20,7 @@ func TestMain(m *testing.M) {
 	config.LoadConfig()
 	// Ensure directories exist
 	for l := spec.SSTLevel(0); l <= spec.MaxLevel; l++ {
-		os.MkdirAll(l.FolderString(), 0755)
+		os.MkdirAll(l.FolderString(), 0o755)
 	}
 	os.Exit(m.Run())
 }
@@ -59,7 +59,6 @@ func cleanManifest() {
 }
 
 func memTableGenerator(num int) map[string]Value {
-
 	testMemTable := map[string]Value{}
 	for i := 1; i <= num; i++ {
 		testMemTable[fmt.Sprintf("key%d", i)] = Value{Value: fmt.Sprintf("val%d", i)}
@@ -67,7 +66,7 @@ func memTableGenerator(num int) map[string]Value {
 	return testMemTable
 }
 
-func sstGenerator(start int, end int, level spec.SSTLevel) (*spec.SSTMetaData, error) {
+func sstDataGenerator(start int, end int, level spec.SSTLevel) []*spec.SSTEntry {
 	entries := []*spec.SSTEntry{}
 	for i := start; i <= end; i++ {
 		key := fmt.Sprintf("key%05d", i)
@@ -86,7 +85,11 @@ func sstGenerator(start int, end int, level spec.SSTLevel) (*spec.SSTMetaData, e
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].Key < entries[j].Key
 	})
-	return writeSST(entries, level)
+	return entries
+}
+
+func sstGenerator(start int, end int, level spec.SSTLevel) (*spec.SSTMetaData, error) {
+	return writeSST(sstDataGenerator(start, end, level), level)
 }
 
 func Test_flushMemTable(t *testing.T) {
@@ -220,7 +223,6 @@ func Test_checkSST(t *testing.T) {
 			wantPresent: true,
 			wantErr:     false,
 			prepareTest: func() {
-
 				config.Conf.NextFileID[0] = 0
 				config.Conf.NextFileID[1] = 1
 				metadata, _ := sstGenerator(1, 100, spec.SSTLevel(0))
@@ -240,7 +242,6 @@ func Test_checkSST(t *testing.T) {
 			wantPresent: false,
 			wantErr:     false,
 			prepareTest: func() {
-
 				config.Conf.NextFileID[0] = 0
 				config.Conf.NextFileID[1] = 1
 				metadata, _ := sstGenerator(1, 100, spec.SSTLevel(0))
@@ -260,7 +261,6 @@ func Test_checkSST(t *testing.T) {
 			wantPresent: false,
 			wantErr:     false,
 			prepareTest: func() {
-
 				config.Conf.NextFileID[0] = 0
 				config.Conf.NextFileID[1] = 1
 				metadata, _ := sstGenerator(1, 100, spec.SSTLevel(0))
@@ -287,7 +287,6 @@ func Test_checkSST(t *testing.T) {
 			wantPresent: true,
 			wantErr:     false,
 			prepareTest: func() {
-
 				config.Conf.NextFileID[0] = 0
 				config.Conf.NextFileID[1] = 1
 				metadata, _ := sstGenerator(1, 100, spec.SSTLevel(0))
@@ -332,7 +331,6 @@ func Test_checkSST(t *testing.T) {
 			wantPresent: false,
 			wantErr:     false,
 			prepareTest: func() {
-
 				config.Conf.NextFileID[0] = 0
 				config.Conf.NextFileID[1] = 1
 				config.Conf.NextFileID[2] = 0
