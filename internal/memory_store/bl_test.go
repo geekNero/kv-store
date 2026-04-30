@@ -764,28 +764,29 @@ func Test_loadManifest(t *testing.T) {
 			setup: func() {
 				manifest = map[spec.SSTLevel][]*spec.SSTMetaData{
 					0: {{Name: "sst-0.json", FirstKey: "key1", LastKey: "key2"}},
+					1: {},
 					2: {{Name: "sst-2.json", FirstKey: "key3", LastKey: "key4"}},
 				}
 				flushManifest()
 				level1 := spec.SSTLevel(1)
-				sstName := level1.GetSSTPath("sst-1.json")
-				sstName = sstName + ".tmp"
-				f, err := os.Create(sstName)
-				if err != nil {
-					t.Fatalf("failed to create orphaned sst file: %v", err)
-				}
-				f.Close()
+
+				tmpFile := level1.GetSSTPath("test.tmp")
+				os.WriteFile(tmpFile, []byte("test"), 0o644)
+				compactionOrphanedSST := level1.GetSSTPath("sst-3.json")
+				os.WriteFile(compactionOrphanedSST, []byte("test"), 0o644)
 			},
 			want: map[spec.SSTLevel][]*spec.SSTMetaData{
 				0: {{Name: "sst-0.json", FirstKey: "key1", LastKey: "key2"}},
+				1: {},
 				2: {{Name: "sst-2.json", FirstKey: "key3", LastKey: "key4"}},
 			},
 			postCheck: func(t *testing.T) {
 				level1 := spec.SSTLevel(1)
-				sstName := level1.GetSSTPath("sst-1.json")
-				sstName = sstName + ".tmp"
-				if _, err := os.Stat(sstName); !os.IsNotExist(err) {
-					t.Errorf("orphaned SST file was not cleaned up: %s", sstName)
+				if _, err := os.Stat(level1.GetSSTPath("test.tmp")); !os.IsNotExist(err) {
+					t.Errorf("orphaned SST file was not cleaned up: %s", "test.tmp")
+				}
+				if _, err := os.Stat(level1.GetSSTPath("sst-3.json")); !os.IsNotExist(err) {
+					t.Errorf("orphaned SST file was not cleaned up: %s", "sst-3.json")
 				}
 			},
 		},
