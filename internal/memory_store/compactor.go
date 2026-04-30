@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 
+	"kv_store/internal/config"
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
 )
@@ -87,7 +88,6 @@ func (iterator *fileIterator) nextItem() *spec.SSTEntry {
 }
 
 func (iterator *fileIterator) pop() *spec.SSTEntry {
-
 	// set the decodeState to decoding only when an entry has been popped.
 	// nextItem allows one entry accessible even in decodeState = start, refer updateIterables
 	if iterator.decodeState == finish {
@@ -116,7 +116,6 @@ func (iterator *fileIterator) pop() *spec.SSTEntry {
 }
 
 func (iterator *fileIterator) close() error {
-
 	iterator.decodeState = finish
 	err := iterator.f.Close()
 	if err != nil {
@@ -161,8 +160,8 @@ the lists we chose the item from the lower level and discard it from the higher 
 Once the strip reaches it's capactiy, we cut it and save it.
 */
 func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
-	if lowerLevel > spec.MaxLevel || upperLevel > spec.MaxLevel {
-		return fmt.Errorf("level should be less than max level: %d, lowerLevel: %d, upperLevel: %d", int(spec.MaxLevel), int(lowerLevel), int(upperLevel))
+	if lowerLevel > spec.SSTLevel(config.Conf.MaxLevels) || upperLevel > spec.SSTLevel(config.Conf.MaxLevels) {
+		return fmt.Errorf("level should be less than max level: %d, lowerLevel: %d, upperLevel: %d", config.Conf.MaxLevels, int(lowerLevel), int(upperLevel))
 	}
 
 	lowerLevelManifest := manifest[lowerLevel]
@@ -210,8 +209,8 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 				compacteData = pushToCompactedData(compacteData, lowerIterable.pop(), lowerLevel, &finalManifest)
 			case 1:
 				compacteData = pushToCompactedData(compacteData, upperIterable.pop(), upperLevel, &finalManifest)
-				// mark an upperLevel sst as deleted only if it has been popped.
 
+				// mark an upperLevel sst as deleted only if it has been popped.
 				// if upper level sst is mutated than mark it deleted
 				deletedSSTs[upperIterable.index] = struct{}{}
 			case 0:
@@ -223,8 +222,8 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 				deletedSSTs[upperIterable.index] = struct{}{}
 			}
 
-			// update the iterables
-			lowerIterable, upperIterable, err = updateIterables(lowerIterable, upperIterable, lowerLevelManifest, upperLevelManifest, &finalManifest)
+			// update the iterables, if an iterable is returned in the closed state, it means the level the iterable belongs to is exhausted.
+			lowerIterable, upperIterable, err = refreshIterables(lowerIterable, upperIterable, lowerLevelManifest, upperLevelManifest, &finalManifest)
 			// an error is returned when we do not get an iterable necessary for complete compaction.
 			if err != nil {
 				log.Println("error when updating iterables during compaction, error: ", err.Error())
@@ -309,7 +308,6 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 }
 
 func compareNextIteratorItem(lowerIter *fileIterator, upperIter *fileIterator) int {
-
 	// this allows us to drain the remaining iterator if one iterator is closed
 	if upperIter.decodeState == finish {
 		return -1
@@ -346,11 +344,11 @@ func pushToCompactedData(compactedData []*spec.SSTEntry, item *spec.SSTEntry, le
 
 // add a new iterator for each level if possible, if it errors out break the compaction process.
 // if no new iterator is possible for a level, maintain the old iterator to allow the remaining iterator to be drained out.
-func updateIterables(lowerIter *fileIterator, upperIter *fileIterator, lowerLevelManifest, upperLevelManifest []*spec.SSTMetaData, newSSTs *[]*spec.SSTMetaData) (*fileIterator, *fileIterator, error) {
-
+func refreshIterables(lowerIter *fileIterator, upperIter *fileIterator, lowerLevelManifest, upperLevelManifest []*spec.SSTMetaData, newSSTs *[]*spec.SSTMetaData) (*fileIterator, *fileIterator, error) {
 	for {
 		if lowerIter.decodeState == finish {
 
+			// check if a new iterator is possible
 			temp := NewFileIterator(lowerIter.index+1, lowerIter.level)
 			// for a non-error scenario, do not assign the nil iterator back to retain the state of the old iterator
 			if temp != nil {
@@ -382,6 +380,8 @@ func updateIterables(lowerIter *fileIterator, upperIter *fileIterator, lowerLeve
 			op := utility.CompareSSTs(lowerLevelManifest[lowerIter.index], upperLevelManifest[upperIter.index])
 			switch op {
 			case 1:
+				// if upper level iterable is smaller, retain it as it is.
+
 				// let the next iteration handle opening of a new file iterator
 				upperIter.close()
 

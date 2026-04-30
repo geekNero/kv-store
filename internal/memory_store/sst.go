@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"kv_store/internal/config"
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
 )
@@ -70,7 +71,7 @@ outer:
 		// check higher levels
 		level := spec.SSTLevel(1)
 
-		for level <= spec.MaxLevel {
+		for level <= spec.SSTLevel(config.Conf.MaxLevels) {
 			value := searchOrderedSSTs(key, level)
 			if value != nil {
 				if value.Tombstone {
@@ -147,10 +148,27 @@ func cleanupOrphanedSSTs() {
 			log.Printf("failed to read %s directory, error: %s", key.FolderString(), err.Error())
 		}
 
+		// delete all .tmp files and keep track of all ssts files to weed out orphaned ones later on.
+		// keys are file names and value is whether the sst is to be deleted or not.
+		ssts := map[string]bool{}
 		for _, entry := range entries {
-			fmt.Printf("checking file: %s for orphaned sst\n", entry.Name())
 			if filepath.Ext(entry.Name()) == ".tmp" {
 				os.Remove(key.GetSSTPath(entry.Name()))
+			} else if utility.IsSSTFile(entry.Name()) {
+				// mark each sst as to be deleted initially
+				ssts[entry.Name()] = true
+			}
+		}
+
+		// delete the files that are not present in the manifest.
+		// such files can be created when the server crashes mid-compaction
+		for _, entry := range manifest[key] {
+			ssts[entry.Name] = false
+		}
+
+		for filename, toBeDeleted := range ssts {
+			if toBeDeleted {
+				os.Remove(key.GetSSTPath(filename))
 			}
 		}
 	}
