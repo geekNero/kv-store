@@ -47,18 +47,18 @@ func flushMemTable() bool {
 		flushOut = append(flushOut, &sstEntry)
 	}
 
-	level := spec.SSTLevel(0)
+	l0 := spec.SSTLevel(0)
 
-	sst, err := writeSST(flushOut, level)
+	sst, err := writeSST(flushOut, l0)
 	if err != nil {
 		return false
 	}
 
 	memStore = make(map[string]Value)
 	// need to test if reallocating is faster or clearing each entry is faster.
-	manifest[level] = append(manifest[level], sst)
+	manifest[l0] = append(manifest[l0], sst)
 
-	if len(manifest[level]) > config.Conf.LevelSize[int(level)] {
+	if len(manifest[l0]) > config.Conf.LevelSize[int(l0)] {
 		log.Println(" triggered l0 compaction")
 		err = triggerL0Compaction()
 		if err != nil {
@@ -126,6 +126,7 @@ func getNextSSTName(level spec.SSTLevel) string {
 
 	sstName := fmt.Sprintf(sstTemplate, config.Conf.NextFileID[level])
 	config.Conf.NextFileID[level]++
+	// TODO: Avoid flushing config so frequently
 	config.FlushConfig()
 
 	return sstName

@@ -24,13 +24,9 @@ func LoadConfig() error {
 			MaxLevels:  spec.DefaultMaxLevel,
 		}
 
-		Conf.LevelSize[0] = 4
-
 		// ensure folders for each level are created
 		for l := 0; l <= Conf.MaxLevels; l++ {
-			if l > 0 {
-				Conf.LevelSize[l] = spec.DefaultLevelCapacity
-			}
+			Conf.LevelSize[l] = spec.DefaultLevelCapacity
 
 			err := os.MkdirAll(spec.SSTLevel(l).FolderString(), 0o755)
 			if err != nil {
@@ -38,6 +34,7 @@ func LoadConfig() error {
 				return err
 			}
 		}
+		Conf.LevelSize[0] = 4
 
 		return nil
 	}
