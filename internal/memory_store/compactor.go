@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 
+	"kv_store/internal/config"
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
 )
@@ -159,8 +160,8 @@ the lists we chose the item from the lower level and discard it from the higher 
 Once the strip reaches it's capactiy, we cut it and save it.
 */
 func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
-	if lowerLevel > spec.DefaultMaxLevel || upperLevel > spec.DefaultMaxLevel {
-		return fmt.Errorf("level should be less than max level: %d, lowerLevel: %d, upperLevel: %d", int(spec.DefaultMaxLevel), int(lowerLevel), int(upperLevel))
+	if lowerLevel > spec.SSTLevel(config.Conf.MaxLevels) || upperLevel > spec.SSTLevel(config.Conf.MaxLevels) {
+		return fmt.Errorf("level should be less than max level: %d, lowerLevel: %d, upperLevel: %d", config.Conf.MaxLevels, int(lowerLevel), int(upperLevel))
 	}
 
 	lowerLevelManifest := manifest[lowerLevel]

@@ -114,6 +114,9 @@ func TestFileIterator_EdgeCases(t *testing.T) {
 	})
 }
 
+// Test_triggerL0Compaction isn't a table driven test as of now because we do not have stable compaction code. For now,
+// we need to ensure there's one positive working path until we finish development.
+// TODO: Cover more positive and negative scenarios once done.
 func Test_triggerL0Compaction(t *testing.T) {
 	cleanup := func() {
 		cleanManifest()

@@ -120,7 +120,7 @@ func writeSST(data []*spec.SSTEntry, level spec.SSTLevel) (*spec.SSTMetaData, er
 }
 
 func getNextSSTName(level spec.SSTLevel) string {
-	if level > spec.DefaultMaxLevel {
+	if level > spec.SSTLevel(config.Conf.MaxLevels) {
 		return ""
 	}
 
