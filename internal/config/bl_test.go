@@ -17,8 +17,8 @@ func TestConfig(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadConfig failed: %v", err)
 		}
-		if len(Conf.LevelSize) != int(spec.DefaultMaxLevel)+1 {
-			t.Errorf("expected LevelSize length %d, got %d", int(spec.DefaultMaxLevel)+1, len(Conf.LevelSize))
+		if len(Conf.LevelSize) != int(spec.DefaultMaxLevel) {
+			t.Errorf("expected LevelSize length %d, got %d", int(spec.DefaultMaxLevel), len(Conf.LevelSize))
 		}
 		if Conf.MaxLevels != spec.DefaultMaxLevel {
 			t.Errorf("expected MaxLevels %d, got %d", spec.DefaultMaxLevel, Conf.MaxLevels)
