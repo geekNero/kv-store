@@ -16,17 +16,18 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	os.Remove("config.json")
 	config.LoadConfig()
 	// Ensure directories exist
-	for l := spec.SSTLevel(0); l <= spec.MaxLevel; l++ {
-		os.MkdirAll(l.FolderString(), 0755)
+	for l := spec.SSTLevel(0); l <= spec.DefaultMaxLevel; l++ {
+		os.MkdirAll(l.FolderString(), 0o755)
 	}
 	os.Exit(m.Run())
 }
 
 func cleanSSTFiles() {
 	// Cleanup any sst-files in all levels
-	for l := spec.SSTLevel(0); l <= spec.MaxLevel; l++ {
+	for l := spec.SSTLevel(0); l <= spec.DefaultMaxLevel; l++ {
 		files, err := filepath.Glob(l.GetSSTPath("sst*.json"))
 		if err != nil {
 			fmt.Printf("Failed to cleanup sst-files in %s post test case execution\n", l.FolderString())
@@ -58,7 +59,6 @@ func cleanManifest() {
 }
 
 func memTableGenerator(num int) map[string]Value {
-
 	testMemTable := map[string]Value{}
 	for i := 1; i <= num; i++ {
 		testMemTable[fmt.Sprintf("key%d", i)] = Value{Value: fmt.Sprintf("val%d", i)}
@@ -66,11 +66,11 @@ func memTableGenerator(num int) map[string]Value {
 	return testMemTable
 }
 
-func sstGenerator(start int, end int, level spec.SSTLevel) (*spec.SSTMetaData, error) {
+func sstDataGenerator(start int, end int, level spec.SSTLevel) []*spec.SSTEntry {
 	entries := []*spec.SSTEntry{}
 	for i := start; i <= end; i++ {
-		key := fmt.Sprintf("key%d", i)
-		value := fmt.Sprintf("val%d", i)
+		key := fmt.Sprintf("key%05d", i)
+		value := fmt.Sprintf("val%d", level)
 
 		entry := spec.SSTEntry{
 			Key: key,
@@ -85,7 +85,11 @@ func sstGenerator(start int, end int, level spec.SSTLevel) (*spec.SSTMetaData, e
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].Key < entries[j].Key
 	})
-	return writeSST(entries, level)
+	return entries
+}
+
+func sstGenerator(start int, end int, level spec.SSTLevel) (*spec.SSTMetaData, error) {
+	return writeSST(sstDataGenerator(start, end, level), level)
 }
 
 func Test_flushMemTable(t *testing.T) {
@@ -219,7 +223,6 @@ func Test_checkSST(t *testing.T) {
 			wantPresent: true,
 			wantErr:     false,
 			prepareTest: func() {
-
 				config.Conf.NextFileID[0] = 0
 				config.Conf.NextFileID[1] = 1
 				metadata, _ := sstGenerator(1, 100, spec.SSTLevel(0))
@@ -239,7 +242,6 @@ func Test_checkSST(t *testing.T) {
 			wantPresent: false,
 			wantErr:     false,
 			prepareTest: func() {
-
 				config.Conf.NextFileID[0] = 0
 				config.Conf.NextFileID[1] = 1
 				metadata, _ := sstGenerator(1, 100, spec.SSTLevel(0))
@@ -259,7 +261,6 @@ func Test_checkSST(t *testing.T) {
 			wantPresent: false,
 			wantErr:     false,
 			prepareTest: func() {
-
 				config.Conf.NextFileID[0] = 0
 				config.Conf.NextFileID[1] = 1
 				metadata, _ := sstGenerator(1, 100, spec.SSTLevel(0))
@@ -286,7 +287,6 @@ func Test_checkSST(t *testing.T) {
 			wantPresent: true,
 			wantErr:     false,
 			prepareTest: func() {
-
 				config.Conf.NextFileID[0] = 0
 				config.Conf.NextFileID[1] = 1
 				metadata, _ := sstGenerator(1, 100, spec.SSTLevel(0))
@@ -331,7 +331,6 @@ func Test_checkSST(t *testing.T) {
 			wantPresent: false,
 			wantErr:     false,
 			prepareTest: func() {
-
 				config.Conf.NextFileID[0] = 0
 				config.Conf.NextFileID[1] = 1
 				config.Conf.NextFileID[2] = 0
@@ -765,28 +764,29 @@ func Test_loadManifest(t *testing.T) {
 			setup: func() {
 				manifest = map[spec.SSTLevel][]*spec.SSTMetaData{
 					0: {{Name: "sst-0.json", FirstKey: "key1", LastKey: "key2"}},
+					1: {},
 					2: {{Name: "sst-2.json", FirstKey: "key3", LastKey: "key4"}},
 				}
 				flushManifest()
 				level1 := spec.SSTLevel(1)
-				sstName := level1.GetSSTPath("sst-1.json")
-				sstName = sstName + ".tmp"
-				f, err := os.Create(sstName)
-				if err != nil {
-					t.Fatalf("failed to create orphaned sst file: %v", err)
-				}
-				f.Close()
+
+				tmpFile := level1.GetSSTPath("test.tmp")
+				os.WriteFile(tmpFile, []byte("test"), 0o644)
+				compactionOrphanedSST := level1.GetSSTPath("sst-3.json")
+				os.WriteFile(compactionOrphanedSST, []byte("test"), 0o644)
 			},
 			want: map[spec.SSTLevel][]*spec.SSTMetaData{
 				0: {{Name: "sst-0.json", FirstKey: "key1", LastKey: "key2"}},
+				1: {},
 				2: {{Name: "sst-2.json", FirstKey: "key3", LastKey: "key4"}},
 			},
 			postCheck: func(t *testing.T) {
 				level1 := spec.SSTLevel(1)
-				sstName := level1.GetSSTPath("sst-1.json")
-				sstName = sstName + ".tmp"
-				if _, err := os.Stat(sstName); !os.IsNotExist(err) {
-					t.Errorf("orphaned SST file was not cleaned up: %s", sstName)
+				if _, err := os.Stat(level1.GetSSTPath("test.tmp")); !os.IsNotExist(err) {
+					t.Errorf("orphaned SST file was not cleaned up: %s", "test.tmp")
+				}
+				if _, err := os.Stat(level1.GetSSTPath("sst-3.json")); !os.IsNotExist(err) {
+					t.Errorf("orphaned SST file was not cleaned up: %s", "sst-3.json")
 				}
 			},
 		},

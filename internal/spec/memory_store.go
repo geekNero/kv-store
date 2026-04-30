@@ -6,8 +6,9 @@ import (
 )
 
 const (
-	KeyStorePath = "/keystore/"
-	MaxLevel     = SSTLevel(4)
+	KeyStorePath         = "/keystore/"
+	DefaultMaxLevel      = 4
+	DefaultLevelCapacity = 1000
 )
 
 type PutRequest struct {

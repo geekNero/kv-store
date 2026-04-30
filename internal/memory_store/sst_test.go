@@ -1,15 +1,15 @@
 package memorystore
 
 import (
+	"os"
+	"testing"
+
 	"kv_store/internal/config"
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
-	"os"
-	"testing"
 )
 
 func Test_loadSST(t *testing.T) {
-
 	val1 := "val1"
 
 	tests := []struct {
@@ -100,9 +100,12 @@ func Test_cleanupOrphanedSSTs(t *testing.T) {
 
 	level := spec.SSTLevel(0)
 	manifest[level] = []*spec.SSTMetaData{{Name: "sst-0.json"}}
-	
+
 	tmpFile := level.GetSSTPath("test.tmp")
-	os.WriteFile(tmpFile, []byte("test"), 0644)
+	os.WriteFile(tmpFile, []byte("test"), 0o644)
+
+	compactionOrphanedSST := level.GetSSTPath("sst-32.json")
+	os.WriteFile(compactionOrphanedSST, []byte("test"), 0o644)
 
 	cleanupOrphanedSSTs()
 
@@ -110,4 +113,3 @@ func Test_cleanupOrphanedSSTs(t *testing.T) {
 		t.Errorf("expected .tmp file to be removed")
 	}
 }
-

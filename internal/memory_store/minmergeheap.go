@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 
+	"kv_store/internal/config"
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
 )
@@ -124,7 +125,7 @@ func compact(targetLevel spec.SSTLevel) error {
 	for h.Len() > 0 {
 		top := heap.Pop(&h).(*HeapEntry)
 		// Drop tombstone only on the last level
-		if !(top.Tombstone && targetLevel == spec.MaxLevel) {
+		if !(top.Tombstone && targetLevel == spec.SSTLevel(config.Conf.MaxLevels)) {
 			compactedData = append(compactedData, top.SSTEntry)
 		}
 
