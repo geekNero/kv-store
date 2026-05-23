@@ -145,8 +145,56 @@ func triggerL0Compaction() error {
 		log.Println("failed to compact sst-0 to sst-1, error: ", err.Error())
 		return err
 	}
-
 	resetNegativeCache()
+
+	go shiftLevelCompaction(1)
+
+	return nil
+}
+
+/*
+shiftLevelCompaction handles compaction between levels other than 0. When an odd level has to be compacted, it is simply compacted into the level
+just below it using MergeTheStrips. If an even level is to be compacted, it triggers a compaction between the next two levels below it, and moves
+to the level below it after.
+The last level is never checked for it's capacity.
+*/
+func shiftLevelCompaction(level spec.SSTLevel) error {
+	if level == spec.SSTLevel(config.Conf.MaxLevels) {
+		return nil
+	}
+
+	if len(manifest[level]) >= config.Conf.LevelSize[level] {
+		if level%2 == 1 {
+			err := MergeTheStrips(level, level+1)
+			if err != nil {
+				log.Printf("failed to compact level: %d into level: %d, error: %v\n", level, level+1, err)
+				return err
+			}
+
+			go shiftLevelCompaction(level + 1)
+
+		} else {
+			err := MergeTheStrips(level+1, level+2)
+			if err != nil {
+				log.Printf("failed to make space by compacting %d into %d to make space for %d, err: %v\n", level+1, level+2, level, err)
+				return err
+			}
+
+			// rename current level into the next level
+			os.Remove((level + 1).FolderString())
+			err = os.Rename(level.FolderString(), (level + 1).FolderString())
+			if err != nil {
+				log.Fatalf("failed to rename the folder: %s to folder: %s, error: %v", level.FolderString(), (level + 1).FolderString(), err)
+			}
+
+			f, _ := os.Open(".")
+			f.Sync()
+			f.Close()
+
+			go shiftLevelCompaction(level + 2)
+
+		}
+	}
 
 	return nil
 }
@@ -166,6 +214,11 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 
 	lowerLevelManifest := manifest[lowerLevel]
 	upperLevelManifest := manifest[upperLevel]
+
+	if len(lowerLevelManifest) == 0 {
+		log.Printf("lower level: %d; is empty, skipping merge the strips compaction", lowerLevel)
+		return nil
+	}
 
 	// Narrow the range of upperLevel SSTs to be considered.
 	firstKey := lowerLevelManifest[0].FirstKey
@@ -206,7 +259,7 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 			op := compareNextIteratorItem(lowerIterable, upperIterable)
 			switch op {
 			case -1:
-				compacteData = pushToCompactedData(compacteData, lowerIterable.pop(), lowerLevel, &finalManifest)
+				compacteData = pushToCompactedData(compacteData, lowerIterable.pop(), upperLevel, &finalManifest)
 			case 1:
 				compacteData = pushToCompactedData(compacteData, upperIterable.pop(), upperLevel, &finalManifest)
 
@@ -215,7 +268,7 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 				deletedSSTs[upperIterable.index] = struct{}{}
 			case 0:
 				// if both keys are equal, pick the item from lowerLevel.
-				compacteData = pushToCompactedData(compacteData, lowerIterable.pop(), lowerLevel, &finalManifest)
+				compacteData = pushToCompactedData(compacteData, lowerIterable.pop(), upperLevel, &finalManifest)
 				// drain upperLevel item
 				upperIterable.pop()
 				// if upper level sst is mutated than mark it deleted
@@ -326,11 +379,15 @@ func compareNextIteratorItem(lowerIter *fileIterator, upperIter *fileIterator) i
 }
 
 // pushToCompactedData handles appending the sst entry to compactedData list, and also handles flushing it to an sst incase it crosses the size limit.
-func pushToCompactedData(compactedData []*spec.SSTEntry, item *spec.SSTEntry, level spec.SSTLevel, newSSTs *[]*spec.SSTMetaData) []*spec.SSTEntry {
+func pushToCompactedData(compactedData []*spec.SSTEntry, item *spec.SSTEntry, targetLevel spec.SSTLevel, newSSTs *[]*spec.SSTMetaData) []*spec.SSTEntry {
+	// Skip saving the tombstone for the last level
+	if item.Tombstone && targetLevel == spec.SSTLevel(config.Conf.MaxLevels) {
+		return compactedData
+	}
 	compactedData = append(compactedData, item)
 
 	if len(compactedData) == utility.MemTableSize {
-		metadata, err := writeSST(compactedData, level)
+		metadata, err := writeSST(compactedData, targetLevel)
 		if err != nil {
 			log.Println("failed to write new sst during compaction, error: ", err.Error())
 			return nil
