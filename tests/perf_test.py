@@ -42,7 +42,7 @@ for test in tests:
             except requests.exceptions.ConnectionError:
                 retry -= 1
                 sleepTime = (10 - retry) * 10
-                print(f"server down, retrying in {sleepTime} seconds")
+                print(f"server down while attempting {test} retrying in {sleepTime} seconds")
                 time.sleep(sleepTime)
 
         if response.status_code != 200:
@@ -64,7 +64,7 @@ for test in tests:
             except requests.exceptions.ConnectionError:
                 retry -= 1
                 sleepTime = (10 - retry) * 10
-                print(f"server down, retrying in {sleepTime} seconds")
+                print(f"server down while attempting {test}, retrying in {sleepTime} seconds")
                 time.sleep(sleepTime)
 
         if test[2] == "NOT_FOUND" and response.status_code != 404:

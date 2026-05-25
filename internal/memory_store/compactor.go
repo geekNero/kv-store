@@ -138,14 +138,14 @@ func triggerL0Compaction() error {
 		return err
 	}
 
-	log.Println("finished first compaction state")
-
 	err = MergeTheStrips(spec.SSTLevel(0), spec.SSTLevel(1))
 	if err != nil {
 		log.Println("failed to compact sst-0 to sst-1, error: ", err.Error())
 		return err
 	}
 	resetNegativeCache()
+
+	log.Println("finished l0 compaction, triggering l1 compaction")
 
 	go shiftLevelCompaction(1)
 
@@ -171,6 +171,7 @@ func shiftLevelCompaction(level spec.SSTLevel) error {
 				return err
 			}
 
+			log.Printf("finished %s compaction, triggereing %s compaction\n", level.FolderString(), (level + 1).FolderString())
 			go shiftLevelCompaction(level + 1)
 
 		} else {
@@ -185,15 +186,31 @@ func shiftLevelCompaction(level spec.SSTLevel) error {
 			err = os.Rename(level.FolderString(), (level + 1).FolderString())
 			if err != nil {
 				log.Fatalf("failed to rename the folder: %s to folder: %s, error: %v", level.FolderString(), (level + 1).FolderString(), err)
+				return err
+			}
+
+			err = os.Mkdir(level.FolderString(), 0o755)
+			if err != nil {
+				log.Fatalf("failed to create empty folder for compacted level: %s, error: %v\n", level.FolderString(), err)
+				return err
 			}
 
 			f, _ := os.Open(".")
 			f.Sync()
 			f.Close()
 
+			manifest[level+1], manifest[level] = manifest[level], make([]*spec.SSTMetaData, 0)
+			if err := flushManifest(); err != nil {
+				log.Printf("failed to flush final manifest during shfit compaction for level: %d, err: %v", level, err)
+				return err
+			}
+
+			log.Printf("finished %s compaction, triggering %s compaction\n", level.FolderString(), (level + 2).FolderString())
 			go shiftLevelCompaction(level + 2)
 
 		}
+	} else {
+		log.Printf("limit for %s not reached, stopping compaction chain here\n", level.FolderString())
 	}
 
 	return nil
@@ -275,6 +292,10 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 				deletedSSTs[upperIterable.index] = struct{}{}
 			}
 
+			if compacteData == nil {
+				return fmt.Errorf("failed to push compacted data")
+			}
+
 			// update the iterables, if an iterable is returned in the closed state, it means the level the iterable belongs to is exhausted.
 			lowerIterable, upperIterable, err = refreshIterables(lowerIterable, upperIterable, lowerLevelManifest, upperLevelManifest, &finalManifest)
 			// an error is returned when we do not get an iterable necessary for complete compaction.
@@ -345,7 +366,10 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 
 	manifest[upperLevel] = finalManifest
 	manifest[lowerLevel] = []*spec.SSTMetaData{}
-	flushManifest()
+	if err := flushManifest(); err != nil {
+		log.Printf("failed to flush manifest at the end of Merge the strips for lowerLevel: %d, err: %v", lowerLevel, err)
+		return err
+	}
 
 	err := os.RemoveAll(lowerLevel.FolderString())
 	if err != nil {
@@ -381,6 +405,12 @@ func compareNextIteratorItem(lowerIter *fileIterator, upperIter *fileIterator) i
 // pushToCompactedData handles appending the sst entry to compactedData list, and also handles flushing it to an sst incase it crosses the size limit.
 func pushToCompactedData(compactedData []*spec.SSTEntry, item *spec.SSTEntry, targetLevel spec.SSTLevel, newSSTs *[]*spec.SSTMetaData) []*spec.SSTEntry {
 	// Skip saving the tombstone for the last level
+
+	if item == nil {
+		log.Println("a nil entry was sent for writing, breaking compaction")
+		return nil
+	}
+
 	if item.Tombstone && targetLevel == spec.SSTLevel(config.Conf.MaxLevels) {
 		return compactedData
 	}
@@ -464,6 +494,9 @@ func refreshIterables(lowerIter *fileIterator, upperIter *fileIterator, lowerLev
 			default:
 				return lowerIter, upperIter, nil
 			}
+			// If both the iterators are finished, exit the loop.
+		} else if lowerIter.decodeState == finish && upperIter.decodeState == finish {
+			return nil, nil, nil
 		} else {
 			return lowerIter, upperIter, nil
 		}
