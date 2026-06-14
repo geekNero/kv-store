@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 
+	"kv_store/internal/common"
 	"kv_store/internal/spec"
-	"kv_store/internal/utility"
 )
 
 type negativeCacheKey struct {
@@ -38,7 +38,7 @@ func handlePut(r *spec.PutRequest) bool {
 		Tombstone: false,
 	}
 
-	if len(memStore) >= utility.MemTableSize {
+	if len(memStore) >= common.MemTableSize {
 		flushMemTable()
 		flushWAL()
 	} else {
@@ -49,7 +49,7 @@ func handlePut(r *spec.PutRequest) bool {
 		walWrite(&spec.WALRequest{
 			Key:       r.Key,
 			Value:     r.Value,
-			Operation: utility.PUT,
+			Operation: common.PUT,
 		})
 	}
 
@@ -74,7 +74,6 @@ func handleGet(key string) *string {
 	}
 
 	return &value.Value
-
 }
 
 func handleDelete(key string) (bool, error) {
@@ -99,7 +98,7 @@ func handleDelete(key string) (bool, error) {
 
 	walWrite(&spec.WALRequest{
 		Key:       key,
-		Operation: utility.DELETE,
+		Operation: common.DELETE,
 	})
 
 	return true, nil

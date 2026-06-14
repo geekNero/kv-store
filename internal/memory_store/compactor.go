@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 
+	"kv_store/internal/common"
 	"kv_store/internal/config"
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
@@ -267,7 +268,7 @@ func MergeTheStrips(lowerLevel spec.SSTLevel, upperLevel spec.SSTLevel) error {
 		}
 
 		// set the backing array size so that it does not get reallocated.
-		compacteData := make([]*spec.SSTEntry, 0, utility.MemTableSize)
+		compacteData := make([]*spec.SSTEntry, 0, common.MemTableSize)
 
 		// the range is centered arround lower level, therefore we can reliably iterate over upper level.
 		for upperIterable.index < endUpper {
@@ -416,7 +417,7 @@ func pushToCompactedData(compactedData []*spec.SSTEntry, item *spec.SSTEntry, ta
 	}
 	compactedData = append(compactedData, item)
 
-	if len(compactedData) == utility.MemTableSize {
+	if len(compactedData) == common.MemTableSize {
 		metadata, err := writeSST(compactedData, targetLevel)
 		if err != nil {
 			log.Println("failed to write new sst during compaction, error: ", err.Error())
@@ -424,7 +425,7 @@ func pushToCompactedData(compactedData []*spec.SSTEntry, item *spec.SSTEntry, ta
 		}
 
 		*newSSTs = append(*newSSTs, metadata)
-		return make([]*spec.SSTEntry, 0, utility.MemTableSize)
+		return make([]*spec.SSTEntry, 0, common.MemTableSize)
 	}
 	return compactedData
 }

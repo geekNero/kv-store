@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"kv_store/internal/spec"
-	"kv_store/internal/utility"
 	"log"
 	"os"
+
+	"kv_store/internal/common"
+	"kv_store/internal/spec"
+	"kv_store/internal/utility"
 )
 
 type WAL struct {
@@ -63,7 +65,7 @@ func flushWAL() {
 func loadWAL() error {
 	replay := true
 
-	f, err := os.Open(utility.WALName)
+	f, err := os.Open(common.WALName)
 	if err != nil {
 		if os.IsNotExist(err) {
 			replay = false
@@ -107,18 +109,18 @@ func loadWAL() error {
 			}
 
 			switch kv.Operation {
-			case utility.PUT:
+			case common.PUT:
 				// we cannot use handlePut as handlePut also writes to WAL and we enter a loop.
 				// handlePut(&spec.PutRequest{Key: kv.Key, Value: kv.Value})
 				memStore[kv.Key] = Value{Value: kv.Value, Tombstone: false}
-			case utility.DELETE:
+			case common.DELETE:
 				memStore[kv.Key] = Value{Tombstone: true}
 			}
 		}
 	}
 
 	// open the file handle to WAL
-	wal.fileHandle, err = os.OpenFile(utility.WALName, os.O_TRUNC|os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	wal.fileHandle, err = os.OpenFile(common.WALName, os.O_TRUNC|os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		log.Println("failed to create a new wal file in append mode, error: ", err.Error())
 		return err

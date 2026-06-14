@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 
+	"kv_store/internal/common"
 	"kv_store/internal/config"
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
@@ -135,7 +136,7 @@ func compact(targetLevel spec.SSTLevel) error {
 		// flush into an sst file if data has more than MemTableSize entries.
 		// TODO: stream this data to the new SST file instead of writing it all at once.
 		// To stream, I would have to write the square brackets, and commas on my own, without the help of json package.
-		if len(compactedData) >= utility.MemTableSize {
+		if len(compactedData) >= common.MemTableSize {
 			sstInfo, err := writeSST(compactedData, targetLevel)
 			if err != nil {
 				log.Println("failed to write compacted data to sst file, error: ", err.Error())

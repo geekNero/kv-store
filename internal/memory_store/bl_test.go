@@ -8,6 +8,7 @@ import (
 	"sort"
 	"testing"
 
+	"kv_store/internal/common"
 	"kv_store/internal/config"
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
@@ -16,12 +17,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	os.Remove("config.json")
-	config.LoadConfig()
-	// Ensure directories exist
-	for l := spec.SSTLevel(0); l <= spec.DefaultMaxLevel; l++ {
-		os.MkdirAll(l.FolderString(), 0o755)
-	}
+	utility.CleanStart()
 	os.Exit(m.Run())
 }
 
@@ -45,12 +41,12 @@ func cleanWAL() {
 		wal.fileHandle.Close()
 		wal.fileHandle = nil
 	}
-	_ = os.Remove(utility.WALName)
+	_ = os.Remove(common.WALName)
 }
 
 func cleanManifest() {
 	manifest = make(map[spec.SSTLevel][]*spec.SSTMetaData)
-	_ = os.Remove(utility.ManifestName)
+	_ = os.Remove(common.ManifestName)
 	if config.Conf.NextFileID != nil {
 		for i := range config.Conf.NextFileID {
 			config.Conf.NextFileID[i] = 0
@@ -466,7 +462,7 @@ func Test_putNegativeCache(t *testing.T) {
 func Test_flushManifest(t *testing.T) {
 	cleanupFunc := func() {
 		manifest = make(map[spec.SSTLevel][]*spec.SSTMetaData)
-		_ = os.Remove(utility.ManifestName)
+		_ = os.Remove(common.ManifestName)
 	}
 
 	tests := []struct {
@@ -505,7 +501,7 @@ func Test_flushManifest(t *testing.T) {
 			}
 
 			// Verify file content
-			fileContent, err := os.ReadFile(utility.ManifestName)
+			fileContent, err := os.ReadFile(common.ManifestName)
 			if err != nil {
 				t.Fatalf("failed to read manifest file: %v", err)
 			}
@@ -534,7 +530,7 @@ func Test_walWrite(t *testing.T) {
 				{
 					Key:       "key1",
 					Value:     "val1",
-					Operation: utility.PUT,
+					Operation: common.PUT,
 				},
 			},
 		},
@@ -544,12 +540,12 @@ func Test_walWrite(t *testing.T) {
 				{
 					Key:       "key1",
 					Value:     "val1",
-					Operation: utility.PUT,
+					Operation: common.PUT,
 				},
 				{
 					Key:       "key2",
 					Value:     "val2",
-					Operation: utility.PUT,
+					Operation: common.PUT,
 				},
 			},
 		},
@@ -559,7 +555,7 @@ func Test_walWrite(t *testing.T) {
 				{
 					Key:       "key1",
 					Value:     "garbage",
-					Operation: utility.DELETE,
+					Operation: common.DELETE,
 				},
 			},
 		},
@@ -569,12 +565,12 @@ func Test_walWrite(t *testing.T) {
 				{
 					Key:       "key1",
 					Value:     "val1",
-					Operation: utility.PUT,
+					Operation: common.PUT,
 				},
 				{
 					Key:       "key2",
 					Value:     "garbage",
-					Operation: utility.DELETE,
+					Operation: common.DELETE,
 				},
 			},
 		},
@@ -593,7 +589,7 @@ func Test_walWrite(t *testing.T) {
 			}
 
 			// Read back and verify
-			f, err := os.Open(utility.WALName)
+			f, err := os.Open(common.WALName)
 			if err != nil {
 				t.Fatalf("failed to open WAL: %v", err)
 			}
@@ -607,7 +603,7 @@ func Test_walWrite(t *testing.T) {
 					t.Fatalf("failed to decode WAL entry: %v", err)
 				}
 
-				if got.Key != req.Key || (req.Operation == utility.PUT && req.Value != got.Value) {
+				if got.Key != req.Key || (req.Operation == common.PUT && req.Value != got.Value) {
 					t.Errorf("walWrite() = %v, want %v", got, req)
 				}
 				if got.Hash == 0 {
@@ -630,10 +626,10 @@ func Test_flushWAL(t *testing.T) {
 			defer cleanWAL()
 			loadWAL()
 
-			walWrite(&spec.WALRequest{Key: "k1", Value: "v1", Operation: utility.PUT})
+			walWrite(&spec.WALRequest{Key: "k1", Value: "v1", Operation: common.PUT})
 			flushWAL()
 
-			info, err := os.Stat(utility.WALName)
+			info, err := os.Stat(common.WALName)
 			if err != nil {
 				t.Fatalf("failed to stat WAL: %v", err)
 			}
@@ -656,9 +652,9 @@ func Test_loadWAL(t *testing.T) {
 			setup: func() {
 				cleanWAL()
 				loadWAL()
-				walWrite(&spec.WALRequest{Key: "k1", Value: "v1", Operation: utility.PUT})
-				walWrite(&spec.WALRequest{Key: "k2", Value: "v2", Operation: utility.PUT})
-				walWrite(&spec.WALRequest{Key: "k2", Value: "", Operation: utility.DELETE})
+				walWrite(&spec.WALRequest{Key: "k1", Value: "v1", Operation: common.PUT})
+				walWrite(&spec.WALRequest{Key: "k2", Value: "v2", Operation: common.PUT})
+				walWrite(&spec.WALRequest{Key: "k2", Value: "", Operation: common.DELETE})
 				closeWAL()
 			},
 			want: map[string]Value{"k1": {Value: "v1", Tombstone: false}, "k2": {Value: "", Tombstone: true}},
@@ -668,12 +664,12 @@ func Test_loadWAL(t *testing.T) {
 			setup: func() {
 				cleanWAL()
 				loadWAL()
-				walWrite(&spec.WALRequest{Key: "k1", Value: "v1", Operation: utility.PUT})
-				walWrite(&spec.WALRequest{Key: "k2", Value: "v2", Operation: utility.PUT})
+				walWrite(&spec.WALRequest{Key: "k1", Value: "v1", Operation: common.PUT})
+				walWrite(&spec.WALRequest{Key: "k2", Value: "v2", Operation: common.PUT})
 				closeWAL()
 
 				// Manually corrupt the file
-				f, _ := os.OpenFile(utility.WALName, os.O_RDWR, 0o644)
+				f, _ := os.OpenFile(common.WALName, os.O_RDWR, 0o644)
 				f.Seek(-5, 2) // go back a bit and change something
 				f.Write([]byte("corruption"))
 				f.Close()
@@ -706,11 +702,11 @@ func Test_loadWALTruncation(t *testing.T) {
 	memStore = make(map[string]Value)
 	cleanWAL()
 	loadWAL()
-	walWrite(&spec.WALRequest{Key: "k1", Value: "v1", Operation: utility.PUT})
+	walWrite(&spec.WALRequest{Key: "k1", Value: "v1", Operation: common.PUT})
 	closeWAL()
 
 	// Manually corrupt the file
-	f, _ := os.OpenFile(utility.WALName, os.O_RDWR, 0o644)
+	f, _ := os.OpenFile(common.WALName, os.O_RDWR, 0o644)
 	f.Seek(-5, 2) // go back a bit and change something
 	f.Write([]byte("corruption"))
 	f.Close()
@@ -724,7 +720,7 @@ func Test_loadWALTruncation(t *testing.T) {
 		t.Errorf("memStore mismatch (-got +want):\n%s", diff)
 	}
 
-	info, err := os.Stat(utility.WALName)
+	info, err := os.Stat(common.WALName)
 	if err != nil {
 		t.Fatal(err)
 	}

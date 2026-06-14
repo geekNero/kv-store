@@ -1,18 +1,24 @@
-package memorystore
+package manifest
 
 import (
 	"encoding/json"
 	"log"
 	"os"
+	"sync"
 
+	"kv_store/internal/common"
 	"kv_store/internal/spec"
-	"kv_store/internal/utility"
+)
+
+var (
+	manifest map[spec.SSTLevel][]*spec.SSTMetaData
+	mutex    sync.RWMutex
 )
 
 func flushManifest() error {
 	var f *os.File
 	var err error
-	tempFilename := "temp_" + utility.ManifestName
+	tempFilename := "temp_" + common.ManifestName
 	// handle file create
 	f, err = os.Create(tempFilename)
 	if err != nil {
@@ -38,7 +44,7 @@ func flushManifest() error {
 		return err
 	}
 
-	err = os.Rename(tempFilename, utility.ManifestName)
+	err = os.Rename(tempFilename, common.ManifestName)
 	if err != nil {
 		log.Println("failed to rename temporary manifest, error: ", err.Error())
 		return err
@@ -47,24 +53,24 @@ func flushManifest() error {
 }
 
 // Section of functions that contain code to setup the memory store
-func loadManifest() error {
-	bytes, err := os.ReadFile(utility.ManifestName)
+func LoadManifest() error {
+	bytes, err := os.ReadFile(common.ManifestName)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			log.Println("failed to read manifest file, error: ", err.Error())
 			return err
 		}
 		manifest = make(map[spec.SSTLevel][]*spec.SSTMetaData)
-		cleanupOrphanedSSTs()
-		return nil
+		// mutex =
+	} else {
+		err = json.Unmarshal(bytes, &manifest)
+		if err != nil {
+			log.Println("failed to unmarshal manifest file", err.Error())
+			return err
+		}
 	}
-	err = json.Unmarshal(bytes, &manifest)
-	if err != nil {
-		log.Println("failed to unmarshal manifest file")
-		return err
-	}
-
 	cleanupOrphanedSSTs()
+	mutex = sync.RWMutex{}
 
 	return nil
 }

@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"kv_store/internal/config"
+	"kv_store/internal/manifest"
 	memorystore "kv_store/internal/memory_store"
 	"kv_store/internal/spec"
 	"kv_store/internal/utility"
@@ -25,6 +26,10 @@ func main() {
 	closer := utility.ProfileCPU(cpuprofile)
 	if closer != nil {
 		defer closer()
+	}
+
+	if err := manifest.LoadManifest(); err != nil {
+		log.Fatal("failed to setup manifest")
 	}
 
 	err := memorystore.SetupMemoryStore()

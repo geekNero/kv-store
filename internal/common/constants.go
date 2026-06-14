@@ -1,4 +1,4 @@
-package utility
+package common
 
 const (
 	// Size Limits
